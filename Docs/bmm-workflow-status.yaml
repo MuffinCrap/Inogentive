@@ -26,7 +26,7 @@ workflow_status:
   document-project: Docs/index.md  # agent: analyst
 
   # Phase 0: Discovery
-  brainstorm-project: required  # agent: analyst
+  brainstorm-project: Docs/bmm-brainstorming-session-2025-11-17.md  # agent: analyst
   research: required  # agent: analyst
 
   # Phase 1: Planning
