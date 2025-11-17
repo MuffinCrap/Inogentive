@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx bmad-method install)",
+      "Bash(npx bmad-method@alpha install:*)",
+      "Bash([ -d \"/Users/charlesjr/Claude Projects/Inogentive/.git\" ])",
+      "Bash(mkdir:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
