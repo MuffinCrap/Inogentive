@@ -1,0 +1,39 @@
+Order Quantity
+Quantity Returned
+Average Retail Price
+Total Returns
+Total Orders
+Total Customers
+Return Rate
+Quantity Sold
+Bulk Orders
+Weekend Orders
+Bike Returns
+Bikes Sold
+Bike Return Rate
+All Orders
+% of All Orders
+Overall Average Price
+All Returns
+% of All Returns
+High Ticket Orders
+Total Revenue
+Total Cost
+Total Profit
+YTD Revenue
+Previous Month Revenue
+Revenue Target
+10-Day Rolling Revenue
+Previous Month Orders
+90-Day Rolling Profit
+Order Target
+Revenue Per Customer
+Previous Month Returns
+Profit Target
+Previous Month Profit
+Order Target Gap
+Profit Target Gap
+Revenue Target Gap
+Adjusted Price
+Adjusted Revenue
+Adjusted Profit

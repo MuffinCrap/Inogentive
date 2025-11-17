@@ -1,0 +1,138 @@
+Tables and Columns in the Report
+
+1. Sales Data
+   - OrderNumber
+   - OrderLineItem
+   - OrderQuantity
+   - QuantityType
+   - Retail Price
+   - Revenue
+   - Customer Lookup
+
+2. Customer Lookup
+   - CustomerKey
+   - Prefix
+   - FirstName
+   - LastName
+   - FullName
+   - BirthDate
+   - MaritalStatus
+   - Gender
+   - EmailAddress
+   - AnnualIncome
+   - TotalChildren
+   - EducationLevel
+   - Occupation
+   - HomeOwner
+   - DomainName
+   - Parent
+   - Customer Priority
+   - Income Level
+   - Education Category
+   - Birth Year
+
+3. Product Lookup
+   - ProductKey
+   - ProductSKU
+   - ProductName
+   - ModelName
+   - ProductDescription
+   - ProductColor
+   - ProductStyle
+   - ProductCost
+   - ProductPrice
+   - SKU Type
+   - DiscountPrice
+   - SKU Category
+
+4. Territory Lookup
+   - SalesTerritoryKey
+   - Region
+   - Country
+   - Continent
+
+5. Calendar Lookup
+   - Date
+   - Day Name
+   - Start of Week
+   - Start of Month
+   - Month Name
+   - Month Number
+   - Start of Year
+   - Year
+   - Month Short
+   - Day of Week
+   - Weekend
+   - Start of Quarter
+
+6. Returns Data
+   - ReturnQuantity
+
+7. Product Categories Lookup
+   - ProductCategoryKey
+   - CategoryName
+
+8. Product Subcategories Lookup
+   - ProductSubcategoryKey
+   - SubcategoryName
+
+9. Rolling Calendar
+   - Date
+   - Year
+   - Start of Quarter
+   - Start of Month
+
+10. Measures Table (Calculated Columns)
+    - Order Quantity
+    - Quantity Returned
+    - Average Retail Price
+    - Total Returns
+    - Total Orders
+    - Total Customers
+    - Return Rate
+    - Quantity Sold
+    - Bulk Orders
+    - Weekend Orders
+    - Bike Returns
+    - Bikes Sold
+    - Bike Return Rate
+    - All Orders
+    - % of All Orders
+    - Overall Average Price
+    - All Returns
+    - % of All Returns
+    - High Ticket Orders
+    - Total Revenue
+    - Total Cost
+    - Total Profit
+    - YTD Revenue
+    - Previous Month Revenue
+    - Revenue Target
+    - 10-Day Rolling Revenue
+    - Previous Month Orders
+    - 90-Day Rolling Profit
+    - Order Target
+    - Revenue Per Customer
+    - Previous Month Returns
+    - Profit Target
+    - Previous Month Profit
+    - Order Target Gap
+    - Profit Target Gap
+    - Revenue Target Gap
+    - Adjusted Price
+    - Adjusted Revenue
+    - Adjusted Profit
+
+11. Parameter
+    - Parameter
+    - Parameter Value (Calculated)
+
+12. Price Adjustment Percentage
+    - Price Adjustment Percentage
+    - Price Adjustment Percentage Value (Calculated)
+
+13. Product Metric Selection
+    - Product Metric Selection
+
+14. Customer Metric Selection
+    - Customer Metric Selection

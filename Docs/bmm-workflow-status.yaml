@@ -23,7 +23,7 @@ workflow_path: "enterprise-brownfield.yaml"
 
 workflow_status:
   # Prerequisite: Documentation (brownfield system needs documenting)
-  document-project: required  # agent: analyst
+  document-project: Docs/index.md  # agent: analyst
 
   # Phase 0: Discovery
   brainstorm-project: required  # agent: analyst
