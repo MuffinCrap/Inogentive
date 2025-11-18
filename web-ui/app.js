@@ -6,8 +6,12 @@
 
 const CONFIG = {
     // n8n Webhook URLs - Update these with actual endpoints
-    N8N_SYNC_ANALYZE_WEBHOOK: 'http://localhost:5678/webhook/sync-analyze',
-    N8N_RESEND_WEBHOOK: 'http://localhost:5678/webhook/resend-report',
+    // IMPORTANT: Use HTTPS in production
+    N8N_SYNC_ANALYZE_WEBHOOK: window.APP_CONFIG?.SYNC_WEBHOOK || 'https://localhost:5678/webhook/sync-analyze',
+    N8N_RESEND_WEBHOOK: window.APP_CONFIG?.RESEND_WEBHOOK || 'https://localhost:5678/webhook/resend-report',
+
+    // API Authentication - Set via window.APP_CONFIG in production
+    API_KEY: window.APP_CONFIG?.API_KEY || '',
 
     // Feature flags
     USE_MOCK_DATA: true,  // Set to false when n8n is connected
@@ -16,7 +20,12 @@ const CONFIG = {
     STORAGE_KEYS: {
         RECIPIENTS: 'wr_recipients',
         REPORTS: 'wr_reports'
-    }
+    },
+
+    // Validation limits
+    MAX_EMAIL_LENGTH: 254,
+    MAX_NAME_LENGTH: 100,
+    MAX_ID_LENGTH: 50
 };
 
 // =============================================================================
@@ -77,15 +86,36 @@ function init() {
     renderRecipients();
     renderReports();
     attachEventListeners();
+    initReportListEvents();
+    initRecipientListEvents();
 }
 
 function loadState() {
-    // Load recipients from localStorage
-    const savedRecipients = localStorage.getItem(CONFIG.STORAGE_KEYS.RECIPIENTS);
-    if (savedRecipients) {
-        state.recipients = JSON.parse(savedRecipients);
-    } else {
-        // Default recipients for demo
+    // Load recipients from localStorage with validation
+    try {
+        const savedRecipients = localStorage.getItem(CONFIG.STORAGE_KEYS.RECIPIENTS);
+        if (savedRecipients) {
+            const parsed = JSON.parse(savedRecipients, sanitizeJsonReviver);
+            if (Array.isArray(parsed)) {
+                state.recipients = parsed
+                    .filter(r => r && typeof r === 'object' &&
+                        typeof r.id === 'string' &&
+                        typeof r.email === 'string' &&
+                        isValidEmail(r.email))
+                    .map(r => ({
+                        id: sanitizeId(r.id),
+                        name: sanitizeString(r.name || r.email.split('@')[0], CONFIG.MAX_NAME_LENGTH),
+                        email: r.email.substring(0, CONFIG.MAX_EMAIL_LENGTH)
+                    }));
+            }
+        }
+    } catch (error) {
+        console.error('Error loading recipients:', error);
+        state.recipients = [];
+    }
+
+    // Set defaults if no valid recipients
+    if (state.recipients.length === 0) {
         state.recipients = [
             { id: '1', name: 'John Smith', email: 'john.smith@company.com' },
             { id: '2', name: 'Sarah Johnson', email: 'sarah.j@company.com' }
@@ -93,11 +123,56 @@ function loadState() {
         saveRecipients();
     }
 
-    // Load reports from localStorage
-    const savedReports = localStorage.getItem(CONFIG.STORAGE_KEYS.REPORTS);
-    if (savedReports) {
-        state.reports = JSON.parse(savedReports);
+    // Load reports from localStorage with validation
+    try {
+        const savedReports = localStorage.getItem(CONFIG.STORAGE_KEYS.REPORTS);
+        if (savedReports) {
+            const parsed = JSON.parse(savedReports, sanitizeJsonReviver);
+            if (Array.isArray(parsed)) {
+                state.reports = parsed
+                    .filter(r => r && typeof r === 'object' &&
+                        typeof r.id === 'string' &&
+                        typeof r.date === 'string' &&
+                        typeof r.content === 'string')
+                    .map(r => ({
+                        id: sanitizeId(r.id),
+                        date: r.date,
+                        status: sanitizeStatus(r.status),
+                        recipients: Array.isArray(r.recipients) ? r.recipients.filter(e => typeof e === 'string') : [],
+                        content: r.content
+                    }));
+            }
+        }
+    } catch (error) {
+        console.error('Error loading reports:', error);
+        state.reports = [];
     }
+}
+
+// Prevent prototype pollution in JSON.parse
+function sanitizeJsonReviver(key, value) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+        return undefined;
+    }
+    return value;
+}
+
+// Sanitize ID to only allow safe characters
+function sanitizeId(id) {
+    if (typeof id !== 'string') return generateId();
+    return id.replace(/[^a-zA-Z0-9_-]/g, '').substring(0, CONFIG.MAX_ID_LENGTH);
+}
+
+// Sanitize general strings
+function sanitizeString(str, maxLength) {
+    if (typeof str !== 'string') return '';
+    return str.substring(0, maxLength);
+}
+
+// Sanitize status to only allow valid values
+function sanitizeStatus(status) {
+    const validStatuses = ['draft', 'sent', 'failed'];
+    return validStatuses.includes(status) ? status : 'draft';
 }
 
 function saveRecipients() {
@@ -264,9 +339,7 @@ async function simulateWorkflow(steps, skipDistribute = false) {
 async function executeN8nWorkflow() {
     const response = await fetch(CONFIG.N8N_SYNC_ANALYZE_WEBHOOK, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
+        headers: getSecureHeaders(),
         body: JSON.stringify({
             recipients: state.recipients,
             timestamp: new Date().toISOString()
@@ -287,6 +360,39 @@ async function executeN8nWorkflow() {
     }
 
     return result;
+}
+
+// Generate secure headers for API calls
+function getSecureHeaders() {
+    const headers = {
+        'Content-Type': 'application/json'
+    };
+
+    // Add API key if configured
+    if (CONFIG.API_KEY) {
+        headers['Authorization'] = `Bearer ${CONFIG.API_KEY}`;
+    }
+
+    // Add CSRF token if available (set by server in cookie or meta tag)
+    const csrfToken = getCSRFToken();
+    if (csrfToken) {
+        headers['X-CSRF-Token'] = csrfToken;
+    }
+
+    return headers;
+}
+
+// Get CSRF token from meta tag or cookie
+function getCSRFToken() {
+    // Try meta tag first
+    const metaTag = document.querySelector('meta[name="csrf-token"]');
+    if (metaTag) {
+        return metaTag.getAttribute('content');
+    }
+
+    // Try cookie
+    const match = document.cookie.match(/csrf_token=([^;]+)/);
+    return match ? match[1] : null;
 }
 
 function generateMockReport() {
@@ -424,17 +530,31 @@ function renderRecipients() {
         return;
     }
 
+    // SECURITY: Use data attributes instead of inline onclick handlers
     elements.recipientList.innerHTML = state.recipients.map(recipient => `
         <div class="recipient-item">
             <div class="recipient-info">
                 <span class="recipient-name">${escapeHtml(recipient.name)}</span>
                 <span class="recipient-email">${escapeHtml(recipient.email)}</span>
             </div>
-            <button class="remove-recipient" onclick="removeRecipient('${recipient.id}')" title="Remove">
+            <button class="remove-recipient" data-recipient-id="${escapeHtml(recipient.id)}" title="Remove">
                 &times;
             </button>
         </div>
     `).join('');
+}
+
+// Event delegation for recipient list
+function initRecipientListEvents() {
+    elements.recipientList.addEventListener('click', (e) => {
+        const removeBtn = e.target.closest('.remove-recipient');
+        if (!removeBtn) return;
+
+        const recipientId = removeBtn.dataset.recipientId;
+        if (!recipientId || !isValidId(recipientId)) return;
+
+        removeRecipient(recipientId);
+    });
 }
 
 // =============================================================================
@@ -456,24 +576,53 @@ function renderReports() {
         return;
     }
 
+    // SECURITY: Escape all dynamic values and use data attributes for IDs
     elements.reportList.innerHTML = state.reports.map(report => {
         const date = new Date(report.date);
         const isSelected = state.selectedReports.includes(report.id);
+        const safeId = escapeHtml(report.id);
+        const safeStatus = escapeHtml(report.status);
         return `
-            <div class="report-item has-checkbox ${isSelected ? 'selected' : ''}" onclick="viewReport('${report.id}')">
+            <div class="report-item has-checkbox ${isSelected ? 'selected' : ''}" data-report-id="${safeId}">
                 <input type="checkbox"
                        class="report-checkbox"
                        ${isSelected ? 'checked' : ''}
-                       onclick="event.stopPropagation(); toggleReportSelection('${report.id}')"
+                       data-action="toggle-selection"
                        title="Select for comparison">
                 <div class="report-meta">
-                    <span class="report-date">${date.toLocaleDateString()}</span>
-                    <span class="report-time">${date.toLocaleTimeString()}</span>
+                    <span class="report-date">${escapeHtml(date.toLocaleDateString())}</span>
+                    <span class="report-time">${escapeHtml(date.toLocaleTimeString())}</span>
                 </div>
-                <span class="report-status ${report.status}">${report.status}</span>
+                <span class="report-status ${safeStatus}">${safeStatus}</span>
             </div>
         `;
     }).join('');
+}
+
+// Event delegation for report list clicks
+function initReportListEvents() {
+    elements.reportList.addEventListener('click', (e) => {
+        const reportItem = e.target.closest('.report-item');
+        if (!reportItem) return;
+
+        const reportId = reportItem.dataset.reportId;
+        if (!reportId || !isValidId(reportId)) return;
+
+        // Handle checkbox toggle
+        if (e.target.matches('[data-action="toggle-selection"]')) {
+            e.stopPropagation();
+            toggleReportSelection(reportId);
+            return;
+        }
+
+        // Handle report view
+        viewReport(reportId);
+    });
+}
+
+// Validate ID format
+function isValidId(id) {
+    return typeof id === 'string' && /^[a-zA-Z0-9_-]+$/.test(id) && id.length <= CONFIG.MAX_ID_LENGTH;
 }
 
 function toggleReportSelection(id) {
@@ -538,9 +687,7 @@ async function handleResendReport() {
         try {
             const response = await fetch(CONFIG.N8N_RESEND_WEBHOOK, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: getSecureHeaders(),
                 body: JSON.stringify({
                     reportId: state.currentReport.id,
                     recipients: state.recipients
@@ -849,7 +996,13 @@ function delay(ms) {
 }
 
 function isValidEmail(email) {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    // SECURITY: More robust email validation with length check
+    if (!email || typeof email !== 'string' || email.length > CONFIG.MAX_EMAIL_LENGTH) {
+        return false;
+    }
+    // RFC 5322 compliant regex (simplified but more robust)
+    const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+    return emailRegex.test(email);
 }
 
 function escapeHtml(text) {
@@ -867,9 +1020,12 @@ function getWeekNumber(date) {
 }
 
 function markdownToHtml(markdown) {
-    // Simple markdown to HTML conversion
-    return markdown
-        // Headers
+    // SECURITY: Escape HTML entities BEFORE markdown conversion to prevent XSS
+    const escaped = escapeHtml(markdown);
+
+    // Simple markdown to HTML conversion on escaped content
+    return escaped
+        // Headers (using escaped content, so &lt; becomes safe)
         .replace(/^### (.*$)/gm, '<h4>$1</h4>')
         .replace(/^## (.*$)/gm, '<h3>$1</h3>')
         .replace(/^# (.*$)/gm, '<h2>$1</h2>')
@@ -897,10 +1053,8 @@ function markdownToHtml(markdown) {
         });
 }
 
-// Make functions available globally for onclick handlers
-window.removeRecipient = removeRecipient;
-window.viewReport = viewReport;
-window.toggleReportSelection = toggleReportSelection;
+// Note: Using event delegation instead of inline onclick handlers for security
+// No need for window.* exports - all click handling done via event delegation
 
 // Initialize app when DOM is ready
 document.addEventListener('DOMContentLoaded', init);
