@@ -1,0 +1,906 @@
+// Weekly Report Automation - Main Application Logic
+
+// =============================================================================
+// CONFIGURATION - Update these when n8n is available
+// =============================================================================
+
+const CONFIG = {
+    // n8n Webhook URLs - Update these with actual endpoints
+    N8N_SYNC_ANALYZE_WEBHOOK: 'http://localhost:5678/webhook/sync-analyze',
+    N8N_RESEND_WEBHOOK: 'http://localhost:5678/webhook/resend-report',
+
+    // Feature flags
+    USE_MOCK_DATA: true,  // Set to false when n8n is connected
+
+    // Storage keys
+    STORAGE_KEYS: {
+        RECIPIENTS: 'wr_recipients',
+        REPORTS: 'wr_reports'
+    }
+};
+
+// =============================================================================
+// STATE MANAGEMENT
+// =============================================================================
+
+const state = {
+    recipients: [],
+    reports: [],
+    isProcessing: false,
+    currentReport: null,
+    selectedReports: [],  // For comparison feature
+    pendingReport: null   // For preview before sending
+};
+
+// =============================================================================
+// DOM ELEMENTS
+// =============================================================================
+
+const elements = {
+    syncAnalyzeBtn: document.getElementById('syncAnalyzeBtn'),
+    statusIndicator: document.getElementById('statusIndicator'),
+    statusText: document.getElementById('statusText'),
+    progressSteps: document.getElementById('progressSteps'),
+    recipientList: document.getElementById('recipientList'),
+    newRecipientEmail: document.getElementById('newRecipientEmail'),
+    newRecipientName: document.getElementById('newRecipientName'),
+    addRecipientBtn: document.getElementById('addRecipientBtn'),
+    reportList: document.getElementById('reportList'),
+    reportCount: document.getElementById('reportCount'),
+    reportModal: document.getElementById('reportModal'),
+    modalTitle: document.getElementById('modalTitle'),
+    modalBody: document.getElementById('modalBody'),
+    closeModal: document.getElementById('closeModal'),
+    downloadReport: document.getElementById('downloadReport'),
+    resendReport: document.getElementById('resendReport'),
+    toastContainer: document.getElementById('toastContainer'),
+    // Comparison elements
+    compareBtn: document.getElementById('compareBtn'),
+    comparisonModal: document.getElementById('comparisonModal'),
+    comparisonBody: document.getElementById('comparisonBody'),
+    closeComparisonModal: document.getElementById('closeComparisonModal'),
+    // Preview elements
+    previewModal: document.getElementById('previewModal'),
+    previewBody: document.getElementById('previewBody'),
+    closePreviewModal: document.getElementById('closePreviewModal'),
+    cancelSend: document.getElementById('cancelSend'),
+    regenerateReport: document.getElementById('regenerateReport'),
+    confirmSend: document.getElementById('confirmSend')
+};
+
+// =============================================================================
+// INITIALIZATION
+// =============================================================================
+
+function init() {
+    loadState();
+    renderRecipients();
+    renderReports();
+    attachEventListeners();
+}
+
+function loadState() {
+    // Load recipients from localStorage
+    const savedRecipients = localStorage.getItem(CONFIG.STORAGE_KEYS.RECIPIENTS);
+    if (savedRecipients) {
+        state.recipients = JSON.parse(savedRecipients);
+    } else {
+        // Default recipients for demo
+        state.recipients = [
+            { id: '1', name: 'John Smith', email: 'john.smith@company.com' },
+            { id: '2', name: 'Sarah Johnson', email: 'sarah.j@company.com' }
+        ];
+        saveRecipients();
+    }
+
+    // Load reports from localStorage
+    const savedReports = localStorage.getItem(CONFIG.STORAGE_KEYS.REPORTS);
+    if (savedReports) {
+        state.reports = JSON.parse(savedReports);
+    }
+}
+
+function saveRecipients() {
+    localStorage.setItem(CONFIG.STORAGE_KEYS.RECIPIENTS, JSON.stringify(state.recipients));
+}
+
+function saveReports() {
+    localStorage.setItem(CONFIG.STORAGE_KEYS.REPORTS, JSON.stringify(state.reports));
+}
+
+// =============================================================================
+// EVENT LISTENERS
+// =============================================================================
+
+function attachEventListeners() {
+    // Sync & Analyze button
+    elements.syncAnalyzeBtn.addEventListener('click', handleSyncAnalyze);
+
+    // Add recipient
+    elements.addRecipientBtn.addEventListener('click', handleAddRecipient);
+    elements.newRecipientEmail.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') handleAddRecipient();
+    });
+
+    // Modal controls
+    elements.closeModal.addEventListener('click', closeReportModal);
+    elements.reportModal.addEventListener('click', (e) => {
+        if (e.target === elements.reportModal) closeReportModal();
+    });
+    elements.downloadReport.addEventListener('click', handleDownloadReport);
+    elements.resendReport.addEventListener('click', handleResendReport);
+
+    // Comparison controls
+    elements.compareBtn.addEventListener('click', handleCompareReports);
+    elements.closeComparisonModal.addEventListener('click', closeComparisonModal);
+    elements.comparisonModal.addEventListener('click', (e) => {
+        if (e.target === elements.comparisonModal) closeComparisonModal();
+    });
+
+    // Preview controls
+    elements.closePreviewModal.addEventListener('click', closePreviewModal);
+    elements.previewModal.addEventListener('click', (e) => {
+        if (e.target === elements.previewModal) closePreviewModal();
+    });
+    elements.cancelSend.addEventListener('click', closePreviewModal);
+    elements.regenerateReport.addEventListener('click', handleRegenerate);
+    elements.confirmSend.addEventListener('click', handleConfirmSend);
+
+    // Global keyboard shortcuts
+    document.addEventListener('keydown', handleKeyboardShortcuts);
+}
+
+// =============================================================================
+// KEYBOARD SHORTCUTS
+// =============================================================================
+
+function handleKeyboardShortcuts(e) {
+    // Escape key - close any open modal
+    if (e.key === 'Escape') {
+        if (!elements.previewModal.classList.contains('hidden')) {
+            closePreviewModal();
+        } else if (!elements.reportModal.classList.contains('hidden')) {
+            closeReportModal();
+        } else if (!elements.comparisonModal.classList.contains('hidden')) {
+            closeComparisonModal();
+        }
+        return;
+    }
+
+    // Ctrl/Cmd + Enter - confirm send in preview modal
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        if (!elements.previewModal.classList.contains('hidden') && state.pendingReport) {
+            e.preventDefault();
+            handleConfirmSend();
+        }
+        return;
+    }
+
+    // Enter key in recipient email field - add recipient
+    if (e.key === 'Enter' && document.activeElement === elements.newRecipientName) {
+        e.preventDefault();
+        handleAddRecipient();
+    }
+}
+
+// =============================================================================
+// SYNC & ANALYZE WORKFLOW
+// =============================================================================
+
+async function handleSyncAnalyze() {
+    if (state.isProcessing) return;
+
+    state.isProcessing = true;
+    elements.syncAnalyzeBtn.disabled = true;
+    elements.statusIndicator.classList.remove('hidden');
+    elements.progressSteps.classList.remove('hidden');
+
+    const steps = ['connect', 'extract', 'analyze', 'generate', 'distribute'];
+
+    try {
+        if (CONFIG.USE_MOCK_DATA) {
+            // Simulate workflow with mock data - show preview before sending
+            await simulateWorkflow(steps, true);
+        } else {
+            // Call actual n8n webhook
+            await executeN8nWorkflow();
+        }
+    } catch (error) {
+        console.error('Workflow error:', error);
+        showToast('Error generating report. Please try again.', 'error');
+
+        state.isProcessing = false;
+        elements.syncAnalyzeBtn.disabled = false;
+
+        // Reset progress display after delay
+        setTimeout(() => {
+            elements.statusIndicator.classList.add('hidden');
+            elements.progressSteps.classList.add('hidden');
+            resetProgressSteps();
+        }, 3000);
+    }
+    // Note: Processing state is reset after confirm/cancel in preview mode
+}
+
+async function simulateWorkflow(steps, skipDistribute = false) {
+    const stepMessages = {
+        connect: 'Connecting to Power BI...',
+        extract: 'Extracting data from 14 tables...',
+        analyze: 'AI analyzing data patterns...',
+        generate: 'Generating executive report...',
+        distribute: 'Sending to recipients...'
+    };
+
+    // If skipping distribute (for preview), remove it from steps
+    const stepsToRun = skipDistribute ? steps.filter(s => s !== 'distribute') : steps;
+
+    for (const step of stepsToRun) {
+        updateStatus(stepMessages[step]);
+        setStepActive(step);
+
+        // Simulate processing time
+        await delay(1500 + Math.random() * 1000);
+
+        setStepCompleted(step);
+    }
+
+    // Create mock report
+    const report = generateMockReport();
+
+    if (skipDistribute) {
+        // Show preview instead of sending
+        report.status = 'draft';
+        state.pendingReport = report;
+        updateStatus('Ready for review');
+        showPreviewModal(report);
+    } else {
+        updateStatus('Complete!');
+        state.reports.unshift(report);
+        saveReports();
+        renderReports();
+    }
+}
+
+async function executeN8nWorkflow() {
+    const response = await fetch(CONFIG.N8N_SYNC_ANALYZE_WEBHOOK, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            recipients: state.recipients,
+            timestamp: new Date().toISOString()
+        })
+    });
+
+    if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const result = await response.json();
+
+    // Add report to history
+    if (result.report) {
+        state.reports.unshift(result.report);
+        saveReports();
+        renderReports();
+    }
+
+    return result;
+}
+
+function generateMockReport() {
+    const now = new Date();
+    return {
+        id: generateId(),
+        date: now.toISOString(),
+        status: 'sent',
+        recipients: state.recipients.map(r => r.email),
+        content: generateMockReportContent(now)
+    };
+}
+
+function generateMockReportContent(date) {
+    const weekNum = getWeekNumber(date);
+    return `
+# Weekly Executive Report - Week ${weekNum}
+
+**Generated:** ${date.toLocaleString()}
+
+## Executive Summary
+
+This automated analysis covers performance metrics across all 90+ retail locations for the week ending ${date.toLocaleDateString()}.
+
+### Key Highlights
+
+- **Total Revenue:** £2.4M (+3.2% WoW)
+- **Conversion Rate:** 4.8% (+0.3pp vs last week)
+- **Average Transaction Value:** £47.50 (-1.2% WoW)
+- **Store Traffic:** 51,230 visitors (+5.1% WoW)
+
+### Performance Insights
+
+**Strong Performers:**
+- London flagship store showing 12% revenue increase
+- Online orders up 8% with improved fulfillment times
+- New product category driving 15% of incremental sales
+
+**Areas Requiring Attention:**
+- Northern region stores showing 2% decline in conversion
+- Inventory turnover slower than target in 12 locations
+- Customer satisfaction scores dipped in 3 stores
+
+### Recommendations
+
+1. **Immediate Action:** Review staffing levels in underperforming Northern stores
+2. **This Week:** Launch targeted promotion for slow-moving inventory
+3. **Monitor:** Customer feedback trends at flagged locations
+
+### Week-over-Week Changes
+
+| Metric | This Week | Last Week | Change |
+|--------|-----------|-----------|--------|
+| Revenue | £2.4M | £2.32M | +3.2% |
+| Transactions | 50,526 | 49,100 | +2.9% |
+| Avg Basket | £47.50 | £48.09 | -1.2% |
+| Returns | 3.2% | 3.5% | -0.3pp |
+
+---
+
+*Report generated automatically by Inovora Weekly Report Automation*
+    `.trim();
+}
+
+// =============================================================================
+// RECIPIENT MANAGEMENT
+// =============================================================================
+
+async function handleAddRecipient() {
+    const email = elements.newRecipientEmail.value.trim();
+    const name = elements.newRecipientName.value.trim() || email.split('@')[0];
+
+    if (!email) {
+        showToast('Please enter an email address', 'error');
+        return;
+    }
+
+    if (!isValidEmail(email)) {
+        showToast('Please enter a valid email address', 'error');
+        return;
+    }
+
+    if (state.recipients.some(r => r.email === email)) {
+        showToast('This email is already in the list', 'error');
+        return;
+    }
+
+    // Brief loading state for feedback
+    elements.addRecipientBtn.classList.add('btn-loading');
+    elements.addRecipientBtn.disabled = true;
+    await delay(300);
+
+    const recipient = {
+        id: generateId(),
+        name: name,
+        email: email
+    };
+
+    state.recipients.push(recipient);
+    saveRecipients();
+    renderRecipients();
+
+    // Clear inputs
+    elements.newRecipientEmail.value = '';
+    elements.newRecipientName.value = '';
+
+    // Reset button
+    elements.addRecipientBtn.classList.remove('btn-loading');
+    elements.addRecipientBtn.disabled = false;
+
+    showToast(`Added ${name} to recipients`, 'success');
+
+    // Focus back to email input for quick additions
+    elements.newRecipientEmail.focus();
+}
+
+function removeRecipient(id) {
+    const recipient = state.recipients.find(r => r.id === id);
+    state.recipients = state.recipients.filter(r => r.id !== id);
+    saveRecipients();
+    renderRecipients();
+
+    if (recipient) {
+        showToast(`Removed ${recipient.name} from recipients`, 'info');
+    }
+}
+
+function renderRecipients() {
+    if (state.recipients.length === 0) {
+        elements.recipientList.innerHTML = `
+            <div class="empty-state" style="padding: 1rem;">
+                <p>No recipients added yet.</p>
+            </div>
+        `;
+        return;
+    }
+
+    elements.recipientList.innerHTML = state.recipients.map(recipient => `
+        <div class="recipient-item">
+            <div class="recipient-info">
+                <span class="recipient-name">${escapeHtml(recipient.name)}</span>
+                <span class="recipient-email">${escapeHtml(recipient.email)}</span>
+            </div>
+            <button class="remove-recipient" onclick="removeRecipient('${recipient.id}')" title="Remove">
+                &times;
+            </button>
+        </div>
+    `).join('');
+}
+
+// =============================================================================
+// REPORT HISTORY
+// =============================================================================
+
+function renderReports() {
+    elements.reportCount.textContent = `${state.reports.length} report${state.reports.length !== 1 ? 's' : ''}`;
+
+    // Update compare button state
+    elements.compareBtn.disabled = state.selectedReports.length !== 2;
+
+    if (state.reports.length === 0) {
+        elements.reportList.innerHTML = `
+            <div class="empty-state">
+                <p>No reports generated yet. Click "Sync & Analyze" to create your first report.</p>
+            </div>
+        `;
+        return;
+    }
+
+    elements.reportList.innerHTML = state.reports.map(report => {
+        const date = new Date(report.date);
+        const isSelected = state.selectedReports.includes(report.id);
+        return `
+            <div class="report-item has-checkbox ${isSelected ? 'selected' : ''}" onclick="viewReport('${report.id}')">
+                <input type="checkbox"
+                       class="report-checkbox"
+                       ${isSelected ? 'checked' : ''}
+                       onclick="event.stopPropagation(); toggleReportSelection('${report.id}')"
+                       title="Select for comparison">
+                <div class="report-meta">
+                    <span class="report-date">${date.toLocaleDateString()}</span>
+                    <span class="report-time">${date.toLocaleTimeString()}</span>
+                </div>
+                <span class="report-status ${report.status}">${report.status}</span>
+            </div>
+        `;
+    }).join('');
+}
+
+function toggleReportSelection(id) {
+    const index = state.selectedReports.indexOf(id);
+    if (index === -1) {
+        // Can only select up to 2 reports for comparison
+        if (state.selectedReports.length >= 2) {
+            state.selectedReports.shift(); // Remove oldest selection
+        }
+        state.selectedReports.push(id);
+    } else {
+        state.selectedReports.splice(index, 1);
+    }
+    renderReports();
+}
+
+function viewReport(id) {
+    const report = state.reports.find(r => r.id === id);
+    if (!report) return;
+
+    state.currentReport = report;
+
+    const date = new Date(report.date);
+    elements.modalTitle.textContent = `Report - ${date.toLocaleDateString()}`;
+    elements.modalBody.innerHTML = `<div class="report-content">${markdownToHtml(report.content)}</div>`;
+    elements.reportModal.classList.remove('hidden');
+}
+
+function closeReportModal() {
+    elements.reportModal.classList.add('hidden');
+    state.currentReport = null;
+}
+
+function handleDownloadReport() {
+    if (!state.currentReport) return;
+
+    const blob = new Blob([state.currentReport.content], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+
+    const date = new Date(state.currentReport.date);
+    a.href = url;
+    a.download = `weekly-report-${date.toISOString().split('T')[0]}.md`;
+    a.click();
+
+    URL.revokeObjectURL(url);
+    showToast('Report downloaded', 'success');
+}
+
+async function handleResendReport() {
+    if (!state.currentReport) return;
+
+    // Add loading state to button
+    elements.resendReport.classList.add('btn-loading');
+    elements.resendReport.disabled = true;
+
+    if (CONFIG.USE_MOCK_DATA) {
+        // Simulate resend with delay
+        await delay(1000);
+        showToast('Report resent to all recipients', 'success');
+    } else {
+        try {
+            const response = await fetch(CONFIG.N8N_RESEND_WEBHOOK, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    reportId: state.currentReport.id,
+                    recipients: state.recipients
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            showToast('Report resent to all recipients', 'success');
+        } catch (error) {
+            console.error('Resend error:', error);
+            showToast('Error resending report', 'error');
+        }
+    }
+
+    // Reset button state
+    elements.resendReport.classList.remove('btn-loading');
+    elements.resendReport.disabled = false;
+}
+
+// =============================================================================
+// PREVIEW MODE
+// =============================================================================
+
+function showPreviewModal(report) {
+    const recipientEmails = state.recipients.map(r => r.email).join(', ');
+
+    elements.previewBody.innerHTML = `
+        <div class="preview-recipients">
+            <strong>Recipients:</strong> ${escapeHtml(recipientEmails) || 'No recipients configured'}
+        </div>
+        <div class="report-content">${markdownToHtml(report.content)}</div>
+    `;
+
+    elements.previewModal.classList.remove('hidden');
+}
+
+function closePreviewModal() {
+    elements.previewModal.classList.add('hidden');
+    state.pendingReport = null;
+
+    // Reset processing state
+    state.isProcessing = false;
+    elements.syncAnalyzeBtn.disabled = false;
+
+    setTimeout(() => {
+        elements.statusIndicator.classList.add('hidden');
+        elements.progressSteps.classList.add('hidden');
+        resetProgressSteps();
+    }, 500);
+}
+
+async function handleConfirmSend() {
+    if (!state.pendingReport) return;
+
+    // Add loading state to button
+    elements.confirmSend.classList.add('btn-loading');
+    elements.confirmSend.disabled = true;
+
+    // Close preview modal
+    elements.previewModal.classList.add('hidden');
+
+    // Complete the distribution step
+    updateStatus('Sending to recipients...');
+    setStepActive('distribute');
+    await delay(1500);
+    setStepCompleted('distribute');
+    updateStatus('Complete!');
+
+    // Save report as sent
+    state.pendingReport.status = 'sent';
+    state.reports.unshift(state.pendingReport);
+    saveReports();
+    renderReports();
+
+    state.pendingReport = null;
+    showToast('Report generated and sent successfully!', 'success');
+
+    // Reset button state
+    elements.confirmSend.classList.remove('btn-loading');
+    elements.confirmSend.disabled = false;
+
+    // Reset processing state
+    state.isProcessing = false;
+    elements.syncAnalyzeBtn.disabled = false;
+
+    setTimeout(() => {
+        elements.statusIndicator.classList.add('hidden');
+        elements.progressSteps.classList.add('hidden');
+        resetProgressSteps();
+    }, 3000);
+}
+
+async function handleRegenerate() {
+    if (!state.pendingReport) return;
+
+    // Close preview modal
+    elements.previewModal.classList.add('hidden');
+
+    // Add spinning animation to button
+    elements.regenerateReport.classList.add('regenerating');
+
+    // Reset progress steps
+    resetProgressSteps();
+
+    // Re-run the generation workflow
+    const steps = ['connect', 'extract', 'analyze', 'generate', 'distribute'];
+
+    try {
+        await simulateWorkflow(steps, true);
+    } catch (error) {
+        console.error('Regenerate error:', error);
+        showToast('Error regenerating report', 'error');
+    } finally {
+        elements.regenerateReport.classList.remove('regenerating');
+    }
+}
+
+// =============================================================================
+// REPORT COMPARISON
+// =============================================================================
+
+function handleCompareReports() {
+    if (state.selectedReports.length !== 2) {
+        showToast('Please select exactly 2 reports to compare', 'error');
+        return;
+    }
+
+    const report1 = state.reports.find(r => r.id === state.selectedReports[0]);
+    const report2 = state.reports.find(r => r.id === state.selectedReports[1]);
+
+    if (!report1 || !report2) return;
+
+    // Sort by date (older first)
+    const [older, newer] = new Date(report1.date) < new Date(report2.date)
+        ? [report1, report2]
+        : [report2, report1];
+
+    elements.comparisonBody.innerHTML = generateComparisonContent(older, newer);
+    elements.comparisonModal.classList.remove('hidden');
+}
+
+function closeComparisonModal() {
+    elements.comparisonModal.classList.add('hidden');
+}
+
+function generateComparisonContent(older, newer) {
+    const olderDate = new Date(older.date);
+    const newerDate = new Date(newer.date);
+
+    // Extract metrics for delta calculation
+    const olderMetrics = extractMetrics(older.content);
+    const newerMetrics = extractMetrics(newer.content);
+
+    // Generate delta summary
+    let deltaHtml = '';
+    if (Object.keys(olderMetrics).length > 0 && Object.keys(newerMetrics).length > 0) {
+        deltaHtml = `
+            <div class="delta-summary">
+                <h4>Key Changes</h4>
+                ${generateDeltaItems(olderMetrics, newerMetrics)}
+            </div>
+        `;
+    }
+
+    return `
+        ${deltaHtml}
+        <div class="comparison-column">
+            <h4>Older: ${olderDate.toLocaleDateString()} ${olderDate.toLocaleTimeString()}</h4>
+            <div class="report-content">${markdownToHtml(older.content)}</div>
+        </div>
+        <div class="comparison-column">
+            <h4>Newer: ${newerDate.toLocaleDateString()} ${newerDate.toLocaleTimeString()}</h4>
+            <div class="report-content">${markdownToHtml(newer.content)}</div>
+        </div>
+    `;
+}
+
+function extractMetrics(content) {
+    const metrics = {};
+
+    // Extract key metrics from the report content
+    const revenueMatch = content.match(/Total Revenue:\*?\*?\s*£?([\d.]+)M/i);
+    if (revenueMatch) metrics.revenue = parseFloat(revenueMatch[1]);
+
+    const conversionMatch = content.match(/Conversion Rate:\*?\*?\s*([\d.]+)%/i);
+    if (conversionMatch) metrics.conversion = parseFloat(conversionMatch[1]);
+
+    const atvMatch = content.match(/Average Transaction Value:\*?\*?\s*£?([\d.]+)/i);
+    if (atvMatch) metrics.atv = parseFloat(atvMatch[1]);
+
+    const trafficMatch = content.match(/Store Traffic:\*?\*?\s*([\d,]+)/i);
+    if (trafficMatch) metrics.traffic = parseInt(trafficMatch[1].replace(/,/g, ''));
+
+    return metrics;
+}
+
+function generateDeltaItems(older, newer) {
+    const items = [];
+
+    if (older.revenue && newer.revenue) {
+        const change = ((newer.revenue - older.revenue) / older.revenue * 100).toFixed(1);
+        const className = change > 0 ? 'delta-positive' : change < 0 ? 'delta-negative' : 'delta-neutral';
+        items.push(`
+            <div class="delta-item">
+                <span>Revenue</span>
+                <span class="${className}">${change > 0 ? '+' : ''}${change}%</span>
+            </div>
+        `);
+    }
+
+    if (older.conversion && newer.conversion) {
+        const change = (newer.conversion - older.conversion).toFixed(1);
+        const className = change > 0 ? 'delta-positive' : change < 0 ? 'delta-negative' : 'delta-neutral';
+        items.push(`
+            <div class="delta-item">
+                <span>Conversion Rate</span>
+                <span class="${className}">${change > 0 ? '+' : ''}${change}pp</span>
+            </div>
+        `);
+    }
+
+    if (older.atv && newer.atv) {
+        const change = ((newer.atv - older.atv) / older.atv * 100).toFixed(1);
+        const className = change > 0 ? 'delta-positive' : change < 0 ? 'delta-negative' : 'delta-neutral';
+        items.push(`
+            <div class="delta-item">
+                <span>Avg Transaction Value</span>
+                <span class="${className}">${change > 0 ? '+' : ''}${change}%</span>
+            </div>
+        `);
+    }
+
+    if (older.traffic && newer.traffic) {
+        const change = ((newer.traffic - older.traffic) / older.traffic * 100).toFixed(1);
+        const className = change > 0 ? 'delta-positive' : change < 0 ? 'delta-negative' : 'delta-neutral';
+        items.push(`
+            <div class="delta-item">
+                <span>Store Traffic</span>
+                <span class="${className}">${change > 0 ? '+' : ''}${change}%</span>
+            </div>
+        `);
+    }
+
+    return items.length > 0 ? items.join('') : '<p>No comparable metrics found</p>';
+}
+
+// =============================================================================
+// UI HELPERS
+// =============================================================================
+
+function updateStatus(message) {
+    elements.statusText.textContent = message;
+}
+
+function setStepActive(stepName) {
+    const step = document.querySelector(`[data-step="${stepName}"]`);
+    if (step) {
+        step.classList.add('active');
+        step.querySelector('.step-icon').innerHTML = '&#9679;';
+    }
+}
+
+function setStepCompleted(stepName) {
+    const step = document.querySelector(`[data-step="${stepName}"]`);
+    if (step) {
+        step.classList.remove('active');
+        step.classList.add('completed');
+        step.querySelector('.step-icon').innerHTML = '&#10003;';
+    }
+}
+
+function resetProgressSteps() {
+    document.querySelectorAll('.step').forEach(step => {
+        step.classList.remove('active', 'completed');
+        step.querySelector('.step-icon').innerHTML = '&#9675;';
+    });
+}
+
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+
+    elements.toastContainer.appendChild(toast);
+
+    // Auto-remove after 4 seconds
+    setTimeout(() => {
+        toast.style.animation = 'slideIn 0.3s ease reverse';
+        setTimeout(() => toast.remove(), 300);
+    }, 4000);
+}
+
+// =============================================================================
+// UTILITY FUNCTIONS
+// =============================================================================
+
+function generateId() {
+    return Date.now().toString(36) + Math.random().toString(36).substr(2);
+}
+
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isValidEmail(email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function getWeekNumber(date) {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
+
+function markdownToHtml(markdown) {
+    // Simple markdown to HTML conversion
+    return markdown
+        // Headers
+        .replace(/^### (.*$)/gm, '<h4>$1</h4>')
+        .replace(/^## (.*$)/gm, '<h3>$1</h3>')
+        .replace(/^# (.*$)/gm, '<h2>$1</h2>')
+        // Bold
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        // Italic
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        // Lists
+        .replace(/^\- (.*$)/gm, '<li>$1</li>')
+        .replace(/^(\d+)\. (.*$)/gm, '<li>$2</li>')
+        // Tables (basic)
+        .replace(/\|(.+)\|/g, (match) => {
+            const cells = match.split('|').filter(c => c.trim());
+            if (cells.every(c => /^[\s-]+$/.test(c))) return '';
+            return '<tr>' + cells.map(c => `<td>${c.trim()}</td>`).join('') + '</tr>';
+        })
+        // Line breaks
+        .replace(/\n\n/g, '</p><p>')
+        // Horizontal rules
+        .replace(/^---$/gm, '<hr>')
+        // Wrap in paragraph
+        .replace(/^(.+)$/gm, (match) => {
+            if (match.startsWith('<')) return match;
+            return match;
+        });
+}
+
+// Make functions available globally for onclick handlers
+window.removeRecipient = removeRecipient;
+window.viewReport = viewReport;
+window.toggleReportSelection = toggleReportSelection;
+
+// Initialize app when DOM is ready
+document.addEventListener('DOMContentLoaded', init);

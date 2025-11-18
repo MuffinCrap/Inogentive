@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weekly Report Automation - Inogentive</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <h1>Weekly Report Automation</h1>
+                <span class="subtitle">Powered by Inovora</span>
+            </div>
+            <div class="schedule-indicator">
+                <span class="schedule-dot"></span>
+                <span>Scheduled: Every Monday 9:00 AM</span>
+            </div>
+        </header>
+
+        <!-- Main Action Panel -->
+        <section class="action-panel">
+            <div class="action-card">
+                <h2>Generate Executive Report</h2>
+                <p>Extract data from Power BI, analyze with AI, and distribute to executives.</p>
+
+                <button id="syncAnalyzeBtn" class="primary-btn">
+                    <span class="btn-icon">&#9889;</span>
+                    Sync & Analyze
+                </button>
+
+                <div id="statusIndicator" class="status-indicator hidden">
+                    <div class="spinner"></div>
+                    <span id="statusText">Initializing...</span>
+                </div>
+
+                <div id="progressSteps" class="progress-steps hidden">
+                    <div class="step" data-step="connect">
+                        <span class="step-icon">&#9675;</span>
+                        <span>Connecting to Power BI</span>
+                    </div>
+                    <div class="step" data-step="extract">
+                        <span class="step-icon">&#9675;</span>
+                        <span>Extracting data (14 tables, 39 measures)</span>
+                    </div>
+                    <div class="step" data-step="analyze">
+                        <span class="step-icon">&#9675;</span>
+                        <span>AI analyzing data</span>
+                    </div>
+                    <div class="step" data-step="generate">
+                        <span class="step-icon">&#9675;</span>
+                        <span>Generating executive report</span>
+                    </div>
+                    <div class="step" data-step="distribute">
+                        <span class="step-icon">&#9675;</span>
+                        <span>Distributing to recipients</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Email Configuration -->
+        <section class="config-panel">
+            <div class="config-card">
+                <h3>Email Recipients</h3>
+                <p>Configure who receives the weekly executive report.</p>
+
+                <div class="recipient-list" id="recipientList">
+                    <!-- Recipients will be added here dynamically -->
+                </div>
+
+                <div class="add-recipient">
+                    <input type="email" id="newRecipientEmail" placeholder="email@company.com">
+                    <input type="text" id="newRecipientName" placeholder="Name (optional)">
+                    <button id="addRecipientBtn" class="secondary-btn">Add</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Report History -->
+        <section class="history-panel">
+            <div class="history-card">
+                <div class="history-header">
+                    <h3>Report History</h3>
+                    <div class="history-actions">
+                        <button id="compareBtn" class="secondary-btn small-btn" disabled>
+                            Compare Selected
+                        </button>
+                        <span id="reportCount" class="report-count">0 reports</span>
+                    </div>
+                </div>
+
+                <div id="reportList" class="report-list">
+                    <div class="empty-state">
+                        <p>No reports generated yet. Click "Sync & Analyze" to create your first report.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Report Comparison Modal -->
+        <div id="comparisonModal" class="modal hidden">
+            <div class="modal-content wide-modal">
+                <div class="modal-header">
+                    <h3>Report Comparison</h3>
+                    <button id="closeComparisonModal" class="close-btn">&times;</button>
+                </div>
+                <div id="comparisonBody" class="modal-body comparison-view">
+                    <!-- Comparison content will be loaded here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Preview Modal (before sending) -->
+        <div id="previewModal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Preview Report</h3>
+                    <button id="closePreviewModal" class="close-btn">&times;</button>
+                </div>
+                <div id="previewBody" class="modal-body">
+                    <!-- Preview content will be loaded here -->
+                </div>
+                <div class="modal-footer">
+                    <span class="shortcut-hint">Esc to cancel, Cmd/Ctrl+Enter to send</span>
+                    <button id="cancelSend" class="secondary-btn">Cancel</button>
+                    <button id="regenerateReport" class="secondary-btn">
+                        <span class="btn-icon">&#8635;</span>
+                        Regenerate
+                    </button>
+                    <button id="confirmSend" class="primary-btn">
+                        <span class="btn-icon">&#9993;</span>
+                        Send to Recipients
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Report Preview Modal -->
+        <div id="reportModal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="modalTitle">Report Preview</h3>
+                    <button id="closeModal" class="close-btn">&times;</button>
+                </div>
+                <div id="modalBody" class="modal-body">
+                    <!-- Report content will be loaded here -->
+                </div>
+                <div class="modal-footer">
+                    <button id="downloadReport" class="secondary-btn">Download</button>
+                    <button id="resendReport" class="primary-btn">Resend Email</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Notifications -->
+        <div id="toastContainer" class="toast-container"></div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
