@@ -87,30 +87,59 @@ async function listDatasets(accessToken) {
 
 /**
  * Get mock data for testing when Power BI is unavailable
+ * Data extracted from AdventureWorks Report PDF
  */
 function getMockData() {
-  console.log('Using MOCK DATA for testing...');
+  console.log('Using MOCK DATA from AdventureWorks Report...');
   return {
     revenue: 24900000,
     ytdRevenue: 24900000,
     orders: 25200,
     customers: 17400,
     returnRate: 2.17,
-    totalCost: 10500000,
-    totalProfit: 14400000,
+    totalCost: 14400000,
+    totalProfit: 10500000,
     revenuePerCustomer: 1431,
-    revenueChange: '5.2',
-    orderChange: '3.8',
-    topProducts: '1. Mountain-200 Black - $1,373,454\n2. Mountain-200 Silver - $1,339,394\n3. Road-250 Red - $1,152,628\n4. Road-350-W Yellow - $1,082,627\n5. Touring-1000 Blue - $932,453',
-    categories: '- Bikes: 13,929 orders, $22,342,809\n- Accessories: 9,137 orders, $1,272,058\n- Clothing: 2,134 orders, $1,285,133',
-    anomalies: [],
+    revenueChange: '3.31',
+    orderChange: '-0.88',
+    topProducts: '1. Sport-100 Helmet, Red - $73,444 (2,099 orders, 3.33% return)\n2. Sport-100 Helmet, Blue - $67,120 (1,995 orders, 3.31% return)\n3. Sport-100 Helmet, Black - $65,270 (1,940 orders, 2.68% return)\n4. Water Bottle - 30 oz. - $39,755 (3,983 orders, 1.95% return)\n5. Road Tire Tube - $17,265 (2,173 orders, 1.55% return)',
+    categories: '- Accessories: 17,000 orders\n- Bikes: 13,900 orders\n- Clothing: 7,000 orders',
+    anomalies: [
+      'Shorts category showing highest return rate - requires attention',
+      'Monthly orders declined by 0.88% (from 2,165 to 2,146)',
+      'Sport-100 Helmet variants have elevated return rates (2.68-3.33%)'
+    ],
     reportDate: new Date().toISOString().split('T')[0],
     weekEnding: new Date().toLocaleDateString('en-GB', {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
       day: 'numeric'
-    })
+    }),
+    // Additional context from AdventureWorks report
+    monthlyRevenue: 1830000,
+    previousMonthRevenue: 1770000,
+    monthlyOrders: 2146,
+    previousMonthOrders: 2165,
+    monthlyReturns: 166,
+    previousMonthReturns: 169,
+    topCustomer: {
+      name: 'Mr. Maurice Shan',
+      orders: 6,
+      revenue: 12408
+    },
+    ordersByIncomeLevel: {
+      average: 11600,
+      low: 11100,
+      high: 2000
+    },
+    ordersByOccupation: {
+      professional: 7900,
+      skilledManual: 6000,
+      management: 4400
+    },
+    mostOrderedProductType: 'Tires and Tubes',
+    mostReturnedProductType: 'Shorts'
   };
 }
 

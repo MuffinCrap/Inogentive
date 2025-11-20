@@ -11,15 +11,19 @@ import config from './config.js';
 export async function generateAnalysis(data) {
   console.log('Generating AI analysis with GPT-4o...');
 
-  const systemPrompt = `You are a senior business analyst generating executive weekly reports for retail operations. Your tone is professional, concise, and actionable. Focus on insights that drive decisions, not just data recitation.
+  const systemPrompt = `You are a senior business analyst and strategic advisor generating comprehensive executive weekly reports for retail operations. Your reports are thorough, data-driven, and provide deep insights that drive strategic decisions.
 
 Key principles:
-- Lead with the most important finding
-- Quantify impact where possible
-- Make recommendations specific and actionable
-- Flag risks early with mitigation suggestions`;
+- Provide comprehensive analysis with specific numbers and percentages
+- Include trend analysis and historical context where relevant
+- Offer multiple levels of recommendations (immediate, short-term, strategic)
+- Identify root causes, not just symptoms
+- Quantify business impact in dollar terms where possible
+- Include competitive and market context
+- Flag risks with severity levels and mitigation strategies
+- Highlight opportunities for growth and optimization`;
 
-  const userPrompt = `Generate a weekly executive report based on this performance data:
+  const userPrompt = `Generate a comprehensive weekly executive report based on this performance data:
 
 ## Current Week Metrics
 - Revenue YTD: $${Number(data.ytdRevenue).toLocaleString()}
@@ -28,6 +32,7 @@ Key principles:
 - Return Rate: ${data.returnRate}%
 - Revenue per Customer: $${Number(data.revenuePerCustomer).toFixed(2)}
 - Total Profit: $${Number(data.totalProfit).toLocaleString()}
+- Total Cost: $${Number(data.totalCost).toLocaleString()}
 
 ## Week-over-Week Changes
 - Revenue Change: ${data.revenueChange}%
@@ -44,13 +49,56 @@ ${data.anomalies.length > 0 ? data.anomalies.join('\n') : 'No significant anomal
 
 ---
 
-Please provide:
-1. **Executive Summary** (3-4 sentences overview of performance)
-2. **Key Wins** (2-3 bullet points of positive trends)
-3. **Areas of Concern** (2-3 bullet points requiring attention)
-4. **Recommended Actions** (2-3 specific, actionable next steps)
+Please provide a DETAILED and COMPREHENSIVE report with the following sections:
 
-Format using markdown headers (##).`;
+## Executive Summary
+Provide a thorough 5-6 sentence overview of overall business performance, highlighting the most critical insights and their strategic implications.
+
+## Financial Performance Analysis
+- Detailed breakdown of revenue performance with trend analysis
+- Profit margin analysis and cost efficiency metrics
+- Revenue per customer trends and customer lifetime value insights
+- Compare current performance against targets/benchmarks
+
+## Key Wins & Positive Trends
+- 4-5 detailed bullet points with specific metrics
+- Explain WHY these are wins and their business impact
+- Identify what's driving these successes
+
+## Areas of Concern & Risk Assessment
+- 4-5 detailed bullet points with severity indicators (High/Medium/Low)
+- Root cause analysis for each concern
+- Potential business impact if not addressed
+- Include the return rate issues and product-specific problems
+
+## Product Performance Deep Dive
+- Analysis of top performers and why they're succeeding
+- Underperforming products and categories
+- Return rate analysis by product with recommendations
+- Inventory and demand insights
+
+## Customer Insights
+- Customer acquisition and retention trends
+- Revenue per customer analysis
+- Customer segment performance
+- Opportunities to increase customer value
+
+## Recommended Actions
+Organize into three tiers:
+### Immediate Actions (This Week)
+- 3-4 specific, tactical actions with expected outcomes
+
+### Short-Term Initiatives (Next 30 Days)
+- 3-4 strategic initiatives with resource requirements
+
+### Strategic Recommendations (Next Quarter)
+- 2-3 longer-term strategic moves with projected ROI
+
+## Risk Mitigation Plan
+- Prioritized list of risks with mitigation strategies
+- Timeline and ownership recommendations
+
+Format using markdown headers (##) and subheaders (###). Use bullet points, bold text for emphasis, and include specific numbers throughout.`;
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -65,7 +113,7 @@ Format using markdown headers (##).`;
         { role: 'user', content: userPrompt }
       ],
       temperature: 0.7,
-      max_tokens: 1000
+      max_tokens: 3000
     })
   });
 
