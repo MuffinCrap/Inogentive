@@ -1,0 +1,3 @@
+[submodule "fabric-mcp"]
+	path = fabric-mcp
+	url = https://github.com/microsoft/mcp.git
