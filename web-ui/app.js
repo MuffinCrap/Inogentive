@@ -5,19 +5,14 @@
 // =============================================================================
 
 const CONFIG = {
-    // Backend API URL - Update for production
+    // Backend API URL - for n8n proxy and PDF generation
     BACKEND_API_URL: window.APP_CONFIG?.BACKEND_URL || 'http://localhost:3001',
 
-    // n8n Webhook URLs - Use local proxy to avoid CORS issues
-    N8N_SYNC_ANALYZE_WEBHOOK: window.APP_CONFIG?.SYNC_WEBHOOK || 'http://localhost:3001/api/n8n-proxy',
-    N8N_RESEND_WEBHOOK: window.APP_CONFIG?.RESEND_WEBHOOK || 'http://localhost:3001/api/n8n-proxy',
+    // n8n Webhook URL - proxied through backend to avoid CORS
+    N8N_WEBHOOK_URL: window.APP_CONFIG?.N8N_WEBHOOK || 'http://localhost:3001/api/n8n-proxy',
 
     // API Authentication - Set via window.APP_CONFIG in production
     API_KEY: window.APP_CONFIG?.API_KEY || '',
-
-    // Feature flags
-    USE_MOCK_DATA: false,  // Set to false to use n8n workflow
-    USE_BACKEND_API: false, // Use the Node.js backend API (set to false to use n8n)
 
     // Storage keys
     STORAGE_KEYS: {
@@ -273,19 +268,9 @@ async function handleSyncAnalyze() {
     elements.statusIndicator.classList.remove('hidden');
     elements.progressSteps.classList.remove('hidden');
 
-    const steps = ['connect', 'extract', 'analyze', 'generate', 'distribute'];
-
     try {
-        if (CONFIG.USE_BACKEND_API) {
-            // Call backend API with real AI analysis
-            await executeBackendWorkflow(steps);
-        } else if (CONFIG.USE_MOCK_DATA) {
-            // Simulate workflow with mock data - show preview before sending
-            await simulateWorkflow(steps, true);
-        } else {
-            // Call actual n8n webhook
-            await executeN8nWorkflow();
-        }
+        // Call n8n webhook via proxy
+        await executeN8nWorkflow();
     } catch (error) {
         console.error('Workflow error:', error);
         showToast('Error generating report. Please try again.', 'error');
@@ -300,191 +285,6 @@ async function handleSyncAnalyze() {
             resetProgressSteps();
         }, 3000);
     }
-    // Note: Processing state is reset after confirm/cancel in preview mode
-}
-
-async function simulateWorkflow(steps, skipDistribute = false) {
-    const stepMessages = {
-        connect: 'Connecting to Power BI...',
-        extract: 'Extracting data from 14 tables...',
-        analyze: 'AI analyzing data patterns...',
-        generate: 'Generating executive report...',
-        distribute: 'Sending to recipients...'
-    };
-
-    // If skipping distribute (for preview), remove it from steps
-    const stepsToRun = skipDistribute ? steps.filter(s => s !== 'distribute') : steps;
-
-    for (const step of stepsToRun) {
-        updateStatus(stepMessages[step]);
-        setStepActive(step);
-
-        // Simulate processing time
-        await delay(1500 + Math.random() * 1000);
-
-        setStepCompleted(step);
-    }
-
-    // Create mock report
-    const report = generateMockReport();
-
-    if (skipDistribute) {
-        // Show preview instead of sending
-        report.status = 'draft';
-        state.pendingReport = report;
-        updateStatus('Ready for review');
-        showPreviewModal(report);
-    } else {
-        updateStatus('Complete!');
-        state.reports.unshift(report);
-        saveReports();
-        renderReports();
-    }
-}
-
-async function executeBackendWorkflow(steps) {
-    const stepMessages = {
-        connect: 'Connecting to Power BI...',
-        extract: 'Extracting data from report...',
-        analyze: 'AI analyzing data patterns...',
-        generate: 'Generating executive report...',
-        distribute: 'Sending to recipients...'
-    };
-
-    // Run through visual progress steps
-    const stepsToRun = steps.filter(s => s !== 'distribute');
-
-    for (let i = 0; i < stepsToRun.length; i++) {
-        const step = stepsToRun[i];
-        updateStatus(stepMessages[step]);
-        setStepActive(step);
-
-        if (i === 0) {
-            // On first step, make the API call
-            await delay(500);
-        } else if (i === 2) {
-            // On analyze step, this is where the real work happens
-            await delay(1000);
-        } else {
-            await delay(800);
-        }
-
-        // Make the actual API call during the 'analyze' step
-        if (step === 'analyze') {
-            try {
-                const response = await fetch(`${CONFIG.BACKEND_API_URL}/api/generate-report`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        sendEmailFlag: false,
-                        useMock: true // Use mock data (AdventureWorks report)
-                    })
-                });
-
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(`Backend API error: ${response.status} - ${errorText}`);
-                }
-
-                const result = await response.json();
-
-                if (!result.success) {
-                    throw new Error(result.error || 'Unknown error from backend');
-                }
-
-                // Store the result for later use
-                state.backendResult = result;
-
-            } catch (error) {
-                console.error('Backend API call failed:', error);
-                throw error;
-            }
-        }
-
-        setStepCompleted(step);
-    }
-
-    // Create report from backend response
-    const now = new Date();
-    const report = {
-        id: generateId(),
-        date: now.toISOString(),
-        status: 'draft',
-        recipients: state.recipients.map(r => r.email),
-        content: generateReportFromBackend(state.backendResult)
-    };
-
-    state.pendingReport = report;
-    updateStatus('Ready for review');
-    showPreviewModal(report);
-}
-
-function generateReportFromBackend(result) {
-    const now = new Date();
-    const weekNum = getWeekNumber(now);
-
-    // Get the analysis from the backend response by fetching the data file
-    const metrics = result.metrics || {};
-
-    return `
-# Weekly Executive Report - Week ${weekNum}
-
-**Generated:** ${now.toLocaleString()}
-**Data Source:** AdventureWorks Report (Power BI)
-
-## Executive Summary
-
-This automated analysis covers performance metrics for AdventureWorks for the week ending ${now.toLocaleDateString()}.
-
-### Key Performance Indicators
-
-- **Total Revenue YTD:** $${Number(metrics.ytdRevenue || 24900000).toLocaleString()}
-- **Total Orders:** ${Number(metrics.orders || 25200).toLocaleString()}
-- **Total Customers:** ${Number(metrics.customers || 17400).toLocaleString()}
-- **Return Rate:** ${metrics.returnRate || '2.17%'}
-- **Week-over-Week Revenue Change:** ${metrics.revenueChange || '+3.31%'}
-- **Week-over-Week Order Change:** ${metrics.orderChange || '-0.88%'}
-
-### Top Products by Revenue
-
-1. Sport-100 Helmet, Red - $73,444 (2,099 orders)
-2. Sport-100 Helmet, Blue - $67,120 (1,995 orders)
-3. Sport-100 Helmet, Black - $65,270 (1,940 orders)
-4. Water Bottle - 30 oz. - $39,755 (3,983 orders)
-5. Road Tire Tube - $17,265 (2,173 orders)
-
-### Orders by Category
-
-- **Accessories:** 17,000 orders
-- **Bikes:** 13,900 orders
-- **Clothing:** 7,000 orders
-
-### Customer Insights
-
-- **Top Customer:** Mr. Maurice Shan - 6 orders, $12,408 revenue
-- **Revenue per Customer:** $1,431
-- **Most Ordered Product Type:** Tires and Tubes
-- **Most Returned Product Type:** Shorts
-
-### Areas Requiring Attention
-
-1. **Shorts Returns** - Highest return rate category, requires quality review
-2. **Helmet Return Rates** - Sport-100 variants showing 2.68-3.33% returns
-3. **Order Decline** - Monthly orders down 0.88% (2,165 → 2,146)
-
-### Recommended Actions
-
-1. **Immediate:** Investigate Shorts quality issues driving high returns
-2. **This Week:** Review Sport-100 Helmet sizing guides to reduce returns
-3. **Monitor:** Track order volume trends for potential seasonal adjustments
-
----
-
-*Report generated automatically by Inovora Weekly Report Automation*
-*Powered by AI analysis of Power BI data*
-    `.trim();
 }
 
 async function executeN8nWorkflow() {
@@ -493,7 +293,7 @@ async function executeN8nWorkflow() {
     setStepActive('connect');
     setStepCompleted('connect');
 
-    const n8nResponse = await fetch(CONFIG.N8N_SYNC_ANALYZE_WEBHOOK, {
+    const n8nResponse = await fetch(CONFIG.N8N_WEBHOOK_URL, {
         method: 'POST',
         headers: getSecureHeaders(),
         body: JSON.stringify({
@@ -606,68 +406,6 @@ function getCSRFToken() {
     // Try cookie
     const match = document.cookie.match(/csrf_token=([^;]+)/);
     return match ? match[1] : null;
-}
-
-function generateMockReport() {
-    const now = new Date();
-    return {
-        id: generateId(),
-        date: now.toISOString(),
-        status: 'sent',
-        recipients: state.recipients.map(r => r.email),
-        content: generateMockReportContent(now)
-    };
-}
-
-function generateMockReportContent(date) {
-    const weekNum = getWeekNumber(date);
-    return `
-# Weekly Executive Report - Week ${weekNum}
-
-**Generated:** ${date.toLocaleString()}
-
-## Executive Summary
-
-This automated analysis covers performance metrics across all 90+ retail locations for the week ending ${date.toLocaleDateString()}.
-
-### Key Highlights
-
-- **Total Revenue:** £2.4M (+3.2% WoW)
-- **Conversion Rate:** 4.8% (+0.3pp vs last week)
-- **Average Transaction Value:** £47.50 (-1.2% WoW)
-- **Store Traffic:** 51,230 visitors (+5.1% WoW)
-
-### Performance Insights
-
-**Strong Performers:**
-- London flagship store showing 12% revenue increase
-- Online orders up 8% with improved fulfillment times
-- New product category driving 15% of incremental sales
-
-**Areas Requiring Attention:**
-- Northern region stores showing 2% decline in conversion
-- Inventory turnover slower than target in 12 locations
-- Customer satisfaction scores dipped in 3 stores
-
-### Recommendations
-
-1. **Immediate Action:** Review staffing levels in underperforming Northern stores
-2. **This Week:** Launch targeted promotion for slow-moving inventory
-3. **Monitor:** Customer feedback trends at flagged locations
-
-### Week-over-Week Changes
-
-| Metric | This Week | Last Week | Change |
-|--------|-----------|-----------|--------|
-| Revenue | £2.4M | £2.32M | +3.2% |
-| Transactions | 50,526 | 49,100 | +2.9% |
-| Avg Basket | £47.50 | £48.09 | -1.2% |
-| Returns | 3.2% | 3.5% | -0.3pp |
-
----
-
-*Report generated automatically by Inovora Weekly Report Automation*
-    `.trim();
 }
 
 // =============================================================================
@@ -888,39 +626,9 @@ function handleDownloadReport() {
 async function handleResendReport() {
     if (!state.currentReport) return;
 
-    // Add loading state to button
-    elements.resendReport.classList.add('btn-loading');
-    elements.resendReport.disabled = true;
-
-    if (CONFIG.USE_MOCK_DATA) {
-        // Simulate resend with delay
-        await delay(1000);
-        showToast('Report resent to all recipients', 'success');
-    } else {
-        try {
-            const response = await fetch(CONFIG.N8N_RESEND_WEBHOOK, {
-                method: 'POST',
-                headers: getSecureHeaders(),
-                body: JSON.stringify({
-                    reportId: state.currentReport.id,
-                    recipients: state.recipients
-                })
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            showToast('Report resent to all recipients', 'success');
-        } catch (error) {
-            console.error('Resend error:', error);
-            showToast('Error resending report', 'error');
-        }
-    }
-
-    // Reset button state
-    elements.resendReport.classList.remove('btn-loading');
-    elements.resendReport.disabled = false;
+    // For n8n POC, resend would need to re-trigger the workflow
+    // For now, show info message
+    showToast('To resend, please generate a new report with "Sync & Analyze"', 'info');
 }
 
 // =============================================================================

@@ -66,7 +66,9 @@ app.post('/api/n8n-proxy', async (req, res) => {
   }
 });
 
-// Generate report endpoint (for N8N webhook)
+// NOT USED IN WEB APP POC - Direct Power BI connection endpoint
+// Web app uses n8n workflow instead via /api/n8n-proxy
+/*
 app.post('/api/generate-report', async (req, res) => {
   const startTime = Date.now();
 
@@ -155,6 +157,7 @@ app.post('/api/generate-report', async (req, res) => {
     });
   }
 });
+*/
 
 // Generate PDF from n8n workflow data
 app.post('/api/generate-pdf', async (req, res) => {
@@ -198,7 +201,9 @@ app.post('/api/generate-pdf', async (req, res) => {
   }
 });
 
-// List reports endpoint
+// NOT USED IN WEB APP POC - Local file report listing
+// Web app stores reports in localStorage instead
+/*
 app.get('/api/reports', async (req, res) => {
   try {
     const reportsDir = join(__dirname, '..', 'reports');
@@ -231,7 +236,6 @@ app.get('/api/reports', async (req, res) => {
   }
 });
 
-// Get specific report
 app.get('/api/reports/:filename', async (req, res) => {
   try {
     const { filename } = req.params;
@@ -264,13 +268,13 @@ app.get('/api/reports/:filename', async (req, res) => {
   }
 });
 
-// Get configuration (non-sensitive)
 app.get('/api/config', (req, res) => {
   res.json({
     emailRecipient: config.email.recipient,
     useMockData: process.env.USE_MOCK_DATA === 'true'
   });
 });
+*/
 
 /**
  * Generate PDF content from n8n workflow report data
@@ -555,19 +559,16 @@ function estimateTotalPages(data) {
 // Start server
 app.listen(PORT, () => {
   console.log('='.repeat(60));
-  console.log('Weekly Report Automation API Server');
+  console.log('Weekly Report Automation API Server - N8N POC');
   console.log('='.repeat(60));
   console.log(`Server running on http://localhost:${PORT}`);
   console.log('');
-  console.log('Available endpoints:');
-  console.log(`  GET  /api/health          - Health check`);
-  console.log(`  POST /api/generate-report - Generate report (N8N webhook)`);
-  console.log(`  POST /api/generate-pdf    - Generate PDF from workflow data`);
-  console.log(`  GET  /api/reports         - List all reports`);
-  console.log(`  GET  /api/reports/:file   - Get specific report`);
-  console.log(`  GET  /api/config          - Get configuration`);
+  console.log('Active endpoints (Web App POC):');
+  console.log(`  GET  /api/health       - Health check`);
+  console.log(`  POST /api/n8n-proxy    - Proxy for n8n webhook (CORS bypass)`);
+  console.log(`  POST /api/generate-pdf - Generate PDF from n8n report data`);
   console.log('');
-  console.log('N8N Webhook URL: POST http://localhost:' + PORT + '/api/generate-report');
+  console.log('Web UI: Open web-ui/index.html in browser');
   console.log('='.repeat(60));
 });
 
