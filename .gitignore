@@ -1,0 +1,55 @@
+# Environment variables and secrets
+.env
+*.env
+.env.local
+.env.*.local
+
+# Dependencies
+node_modules/
+package-lock.json
+
+# Logs
+*.log
+npm-debug.log*
+logs/
+backend-server.log
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.claude/settings.local.json
+
+# Generated reports
+backend/reports/*.html
+backend/reports/*.json
+backend/reports/*.pdf
+
+# Build output
+dist/
+build/
+*.tgz
+
+# Temporary files
+*.tmp
+temp/
+
+# MCP test files
+test-*.sh
+
+# Client context files (may contain sensitive data)
+Claude Projects Context files/
+
+# PDF reports
+*.pdf

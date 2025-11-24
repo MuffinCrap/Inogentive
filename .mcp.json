@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "fabric": {
+      "command": "dotnet",
+      "args": [
+        "run",
+        "--project",
+        "/Users/charlesjr/Claude Projects/Inogentive/fabric-mcp/servers/Fabric.Mcp.Server/src/Fabric.Mcp.Server.csproj",
+        "--",
+        "server",
+        "start",
+        "--mode",
+        "all"
+      ]
+    },
+    "n8n-mcp": {
+      "command": "npx",
+      "args": ["n8n-mcp"],
+      "env": {
+        "MCP_MODE": "stdio",
+        "LOG_LEVEL": "error",
+        "DISABLE_CONSOLE_OUTPUT": "true"
+      }
+    }
+  }
+}

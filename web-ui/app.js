@@ -8,17 +8,16 @@ const CONFIG = {
     // Backend API URL - Update for production
     BACKEND_API_URL: window.APP_CONFIG?.BACKEND_URL || 'http://localhost:3001',
 
-    // n8n Webhook URLs - Update these with actual endpoints
-    // IMPORTANT: Use HTTPS in production
-    N8N_SYNC_ANALYZE_WEBHOOK: window.APP_CONFIG?.SYNC_WEBHOOK || 'https://localhost:5678/webhook/sync-analyze',
-    N8N_RESEND_WEBHOOK: window.APP_CONFIG?.RESEND_WEBHOOK || 'https://localhost:5678/webhook/resend-report',
+    // n8n Webhook URLs - Update with your actual cloud n8n webhook URL
+    // Get this URL from the Webhook node in n8n after activation
+    N8N_SYNC_ANALYZE_WEBHOOK: window.APP_CONFIG?.SYNC_WEBHOOK || 'https://cdpoc.app.n8n.cloud/webhook/weekly-compliance-webhook',
+    N8N_RESEND_WEBHOOK: window.APP_CONFIG?.RESEND_WEBHOOK || 'http://localhost:5678/webhook/resend-report',
 
     // API Authentication - Set via window.APP_CONFIG in production
     API_KEY: window.APP_CONFIG?.API_KEY || '',
 
     // Feature flags
-    USE_MOCK_DATA: false,  // Set to false to use backend API with real AI analysis
-    USE_BACKEND_API: true, // Use the Node.js backend API
+    USE_BACKEND_API: false, // Set to false to use n8n webhook for report generation
 
     // Storage keys
     STORAGE_KEYS: {
@@ -136,14 +135,16 @@ function loadState() {
                 state.reports = parsed
                     .filter(r => r && typeof r === 'object' &&
                         typeof r.id === 'string' &&
-                        typeof r.date === 'string' &&
-                        typeof r.content === 'string')
+                        typeof r.date === 'string')
                     .map(r => ({
                         id: sanitizeId(r.id),
                         date: r.date,
                         status: sanitizeStatus(r.status),
                         recipients: Array.isArray(r.recipients) ? r.recipients.filter(e => typeof e === 'string') : [],
-                        content: r.content
+                        content: r.content || '',
+                        filename: r.filename || null,  // Preserve filename for backend-generated reports
+                        summary: r.summary || null,     // Preserve summary for n8n reports
+                        reportData: r.reportData || null // Preserve reportData for n8n reports
                     }));
             }
         }
@@ -175,7 +176,7 @@ function sanitizeString(str, maxLength) {
 
 // Sanitize status to only allow valid values
 function sanitizeStatus(status) {
-    const validStatuses = ['draft', 'sent', 'failed'];
+    const validStatuses = ['draft', 'sent', 'failed', 'generated'];
     return validStatuses.includes(status) ? status : 'draft';
 }
 
@@ -280,11 +281,8 @@ async function handleSyncAnalyze() {
         if (CONFIG.USE_BACKEND_API) {
             // Call backend API with real AI analysis
             await executeBackendWorkflow(steps);
-        } else if (CONFIG.USE_MOCK_DATA) {
-            // Simulate workflow with mock data - show preview before sending
-            await simulateWorkflow(steps, true);
         } else {
-            // Call actual n8n webhook
+            // Call n8n webhook for full workflow orchestration
             await executeN8nWorkflow();
         }
     } catch (error) {
@@ -302,45 +300,6 @@ async function handleSyncAnalyze() {
         }, 3000);
     }
     // Note: Processing state is reset after confirm/cancel in preview mode
-}
-
-async function simulateWorkflow(steps, skipDistribute = false) {
-    const stepMessages = {
-        connect: 'Connecting to Power BI...',
-        extract: 'Extracting data from 14 tables...',
-        analyze: 'AI analyzing data patterns...',
-        generate: 'Generating executive report...',
-        distribute: 'Sending to recipients...'
-    };
-
-    // If skipping distribute (for preview), remove it from steps
-    const stepsToRun = skipDistribute ? steps.filter(s => s !== 'distribute') : steps;
-
-    for (const step of stepsToRun) {
-        updateStatus(stepMessages[step]);
-        setStepActive(step);
-
-        // Simulate processing time
-        await delay(1500 + Math.random() * 1000);
-
-        setStepCompleted(step);
-    }
-
-    // Create mock report
-    const report = generateMockReport();
-
-    if (skipDistribute) {
-        // Show preview instead of sending
-        report.status = 'draft';
-        state.pendingReport = report;
-        updateStatus('Ready for review');
-        showPreviewModal(report);
-    } else {
-        updateStatus('Complete!');
-        state.reports.unshift(report);
-        saveReports();
-        renderReports();
-    }
 }
 
 async function executeBackendWorkflow(steps) {
@@ -414,7 +373,8 @@ async function executeBackendWorkflow(steps) {
         date: now.toISOString(),
         status: 'draft',
         recipients: state.recipients.map(r => r.email),
-        content: generateReportFromBackend(state.backendResult)
+        content: generateReportFromBackend(state.backendResult),
+        filename: state.backendResult.reportFile  // Store filename for fetching later
     };
 
     state.pendingReport = report;
@@ -489,7 +449,12 @@ This automated analysis covers performance metrics for AdventureWorks for the we
 }
 
 async function executeN8nWorkflow() {
-    const response = await fetch(CONFIG.N8N_SYNC_ANALYZE_WEBHOOK, {
+    // Step 1: Call n8n webhook to process data
+    updateStatus('Calling n8n workflow...');
+    setStepActive('connect');
+    setStepCompleted('connect');
+
+    const n8nResponse = await fetch(CONFIG.N8N_SYNC_ANALYZE_WEBHOOK, {
         method: 'POST',
         headers: getSecureHeaders(),
         body: JSON.stringify({
@@ -498,20 +463,82 @@ async function executeN8nWorkflow() {
         })
     });
 
-    if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+    if (!n8nResponse.ok) {
+        throw new Error(`n8n webhook error! status: ${n8nResponse.status}`);
     }
 
-    const result = await response.json();
+    updateStatus('Extracting Power BI data...');
+    setStepActive('extract');
+    setStepCompleted('extract');
 
-    // Add report to history
-    if (result.report) {
-        state.reports.unshift(result.report);
-        saveReports();
-        renderReports();
+    updateStatus('AI analyzing data...');
+    setStepActive('analyze');
+    setStepCompleted('analyze');
+
+    updateStatus('Generating report...');
+    setStepActive('generate');
+
+    const workflowResult = await n8nResponse.json();
+
+    if (!workflowResult.success || !workflowResult.reportData) {
+        throw new Error('n8n workflow did not return valid report data');
     }
 
-    return result;
+    // Step 2: Generate PDF from report data using backend
+    setStepCompleted('generate');
+    updateStatus('Generating PDF report...');
+    setStepActive('distribute');
+
+    const pdfResponse = await fetch(`${CONFIG.BACKEND_API_URL}/api/generate-pdf`, {
+        method: 'POST',
+        headers: getSecureHeaders(),
+        body: JSON.stringify({
+            reportData: workflowResult.reportData
+        })
+    });
+
+    if (!pdfResponse.ok) {
+        throw new Error(`PDF generation error! status: ${pdfResponse.status}`);
+    }
+
+    // Step 3: Convert PDF to blob and create download link
+    const pdfBlob = await pdfResponse.blob();
+    const pdfUrl = URL.createObjectURL(pdfBlob);
+
+    setStepCompleted('distribute');
+    updateStatus('Report generated successfully!');
+
+    // Create report object for history
+    const report = {
+        id: generateId(),
+        date: workflowResult.reportData.report_date,
+        status: 'generated',
+        pdfUrl: pdfUrl,
+        reportData: workflowResult.reportData,
+        summary: workflowResult.reportData.executive_summary
+    };
+
+    // Add to history
+    state.reports.unshift(report);
+    saveReports();
+    renderReports();
+
+    // Auto-download PDF and show preview
+    downloadPDF(pdfUrl, `weekly-compliance-report-${new Date(report.date).toLocaleDateString('en-GB')}.pdf`);
+    showReportPreview(report);
+
+    // Reset UI state
+    state.isProcessing = false;
+    elements.syncAnalyzeBtn.disabled = false;
+
+    // Hide status indicator and progress after a short delay
+    setTimeout(() => {
+        elements.statusIndicator.classList.add('hidden');
+        elements.progressSteps.classList.add('hidden');
+        resetProgressSteps();
+    }, 2000);
+
+    return report;
 }
 
 // Generate secure headers for API calls
@@ -545,68 +572,6 @@ function getCSRFToken() {
     // Try cookie
     const match = document.cookie.match(/csrf_token=([^;]+)/);
     return match ? match[1] : null;
-}
-
-function generateMockReport() {
-    const now = new Date();
-    return {
-        id: generateId(),
-        date: now.toISOString(),
-        status: 'sent',
-        recipients: state.recipients.map(r => r.email),
-        content: generateMockReportContent(now)
-    };
-}
-
-function generateMockReportContent(date) {
-    const weekNum = getWeekNumber(date);
-    return `
-# Weekly Executive Report - Week ${weekNum}
-
-**Generated:** ${date.toLocaleString()}
-
-## Executive Summary
-
-This automated analysis covers performance metrics across all 90+ retail locations for the week ending ${date.toLocaleDateString()}.
-
-### Key Highlights
-
-- **Total Revenue:** £2.4M (+3.2% WoW)
-- **Conversion Rate:** 4.8% (+0.3pp vs last week)
-- **Average Transaction Value:** £47.50 (-1.2% WoW)
-- **Store Traffic:** 51,230 visitors (+5.1% WoW)
-
-### Performance Insights
-
-**Strong Performers:**
-- London flagship store showing 12% revenue increase
-- Online orders up 8% with improved fulfillment times
-- New product category driving 15% of incremental sales
-
-**Areas Requiring Attention:**
-- Northern region stores showing 2% decline in conversion
-- Inventory turnover slower than target in 12 locations
-- Customer satisfaction scores dipped in 3 stores
-
-### Recommendations
-
-1. **Immediate Action:** Review staffing levels in underperforming Northern stores
-2. **This Week:** Launch targeted promotion for slow-moving inventory
-3. **Monitor:** Customer feedback trends at flagged locations
-
-### Week-over-Week Changes
-
-| Metric | This Week | Last Week | Change |
-|--------|-----------|-----------|--------|
-| Revenue | £2.4M | £2.32M | +3.2% |
-| Transactions | 50,526 | 49,100 | +2.9% |
-| Avg Basket | £47.50 | £48.09 | -1.2% |
-| Returns | 3.2% | 3.5% | -0.3pp |
-
----
-
-*Report generated automatically by Inovora Weekly Report Automation*
-    `.trim();
 }
 
 // =============================================================================
@@ -791,7 +756,7 @@ function toggleReportSelection(id) {
     renderReports();
 }
 
-function viewReport(id) {
+async function viewReport(id) {
     const report = state.reports.find(r => r.id === id);
     if (!report) return;
 
@@ -799,8 +764,111 @@ function viewReport(id) {
 
     const date = new Date(report.date);
     elements.modalTitle.textContent = `Report - ${date.toLocaleDateString()}`;
-    elements.modalBody.innerHTML = `<div class="report-content">${markdownToHtml(report.content)}</div>`;
+
+    // Show loading state
+    elements.modalBody.innerHTML = `<div class="report-content" style="text-align: center; padding: 2rem;">Loading report...</div>`;
     elements.reportModal.classList.remove('hidden');
+
+    try {
+        let content = report.content;
+        let contentFound = false;
+
+        // Strategy 1: If this is an n8n report with summary, display it
+        if (report.summary && report.reportData) {
+            const formattedSummary = formatSummaryText(report.summary);
+            elements.modalBody.innerHTML = `
+                <div class="report-preview-content">
+                    <div class="preview-section">
+                        <h4>Executive Summary</h4>
+                        <div class="summary-text">${formattedSummary}</div>
+                    </div>
+
+                    <div class="preview-section">
+                        <h4>Report Statistics</h4>
+                        <div class="stats-grid">
+                            <div class="stat-item">
+                                <span class="stat-label">Total Stores:</span>
+                                <span class="stat-value">${report.reportData.all_stores?.length || 'N/A'}</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">RED Flags:</span>
+                                <span class="stat-value red">${report.reportData.all_stores?.filter(s => s.overall_status === 'RED').length || 0}</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">YELLOW Warnings:</span>
+                                <span class="stat-value yellow">${report.reportData.all_stores?.filter(s => s.overall_status === 'YELLOW').length || 0}</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">GREEN Compliant:</span>
+                                <span class="stat-value green">${report.reportData.all_stores?.filter(s => s.overall_status === 'GREEN').length || 0}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            return; // Exit early, we've displayed the content
+        }
+
+        // Strategy 2: If report has a filename, fetch it from the backend
+        if (report.filename) {
+            try {
+                const response = await fetch(`${CONFIG.BACKEND_API_URL}/api/reports/${report.filename}`);
+                if (response.ok) {
+                    content = await response.text();
+                    contentFound = true;
+                }
+            } catch (err) {
+                console.warn('Failed to fetch report by filename:', err);
+            }
+        }
+
+        // Strategy 3: Try to find report by date on backend
+        if (!contentFound) {
+            try {
+                // Extract date in YYYY-MM-DD format
+                const reportDate = new Date(report.date).toISOString().split('T')[0];
+                const guessedFilename = `weekly-report-${reportDate}.html`;
+
+                const response = await fetch(`${CONFIG.BACKEND_API_URL}/api/reports/${guessedFilename}`);
+                if (response.ok) {
+                    content = await response.text();
+                    contentFound = true;
+                    // Update report with filename for future use
+                    report.filename = guessedFilename;
+                    saveReports();
+                }
+            } catch (err) {
+                console.warn('Failed to fetch report by date:', err);
+            }
+        }
+
+        // Strategy 4: Use stored content (for legacy/mock reports)
+        if (!contentFound && content) {
+            contentFound = true;
+        }
+
+        // Display content
+        if (contentFound && content) {
+            // If it's HTML, display as-is; if markdown, convert
+            elements.modalBody.innerHTML = content.includes('<html') || content.includes('<!DOCTYPE')
+                ? content
+                : `<div class="report-content">${markdownToHtml(content)}</div>`;
+        } else {
+            elements.modalBody.innerHTML = `
+                <div class="report-content" style="text-align: center; padding: 2rem; color: #666;">
+                    <p>Report content not available</p>
+                    <p style="font-size: 0.9rem; margin-top: 1rem;">This report may have been generated before the latest updates.</p>
+                    <p style="font-size: 0.9rem;">Try generating a new report to see the full content.</p>
+                </div>`;
+        }
+    } catch (error) {
+        console.error('Error loading report:', error);
+        elements.modalBody.innerHTML = `
+            <div class="report-content" style="text-align: center; padding: 2rem; color: #dc3545;">
+                <p>Error loading report</p>
+                <p style="font-size: 0.9rem; margin-top: 0.5rem;">${escapeHtml(error.message)}</p>
+            </div>`;
+    }
 }
 
 function closeReportModal() {
@@ -951,7 +1019,12 @@ async function handleRegenerate() {
     const steps = ['connect', 'extract', 'analyze', 'generate', 'distribute'];
 
     try {
-        await simulateWorkflow(steps, true);
+        if (CONFIG.USE_BACKEND_API) {
+            await executeBackendWorkflow(steps);
+        } else {
+            // Regenerate via n8n is not supported - just show error
+            showToast('Regenerate not supported in n8n mode. Please generate a new report.', 'error');
+        }
     } catch (error) {
         console.error('Regenerate error:', error);
         showToast('Error regenerating report', 'error');
@@ -993,37 +1066,79 @@ function generateComparisonContent(older, newer) {
     const newerDate = new Date(newer.date);
 
     // Extract metrics for delta calculation
-    const olderMetrics = extractMetrics(older.content);
-    const newerMetrics = extractMetrics(newer.content);
+    const olderMetrics = extractMetrics(older);
+    const newerMetrics = extractMetrics(newer);
 
     // Generate delta summary
     let deltaHtml = '';
     if (Object.keys(olderMetrics).length > 0 && Object.keys(newerMetrics).length > 0) {
+        // Use compliance metrics if available, otherwise use legacy metrics
+        const deltaItems = olderMetrics.totalStores !== undefined
+            ? generateComplianceDeltaItems(olderMetrics, newerMetrics)
+            : generateDeltaItems(olderMetrics, newerMetrics);
+
         deltaHtml = `
             <div class="delta-summary">
                 <h4>Key Changes</h4>
-                ${generateDeltaItems(olderMetrics, newerMetrics)}
+                ${deltaItems}
             </div>
         `;
     }
 
+    // Prepare content for display
+    const olderContent = older.summary
+        ? formatSummaryText(older.summary)
+        : markdownToHtml(older.content || 'No content available');
+
+    const newerContent = newer.summary
+        ? formatSummaryText(newer.summary)
+        : markdownToHtml(newer.content || 'No content available');
+
     return `
         ${deltaHtml}
-        <div class="comparison-column">
-            <h4>Older: ${olderDate.toLocaleDateString()} ${olderDate.toLocaleTimeString()}</h4>
-            <div class="report-content">${markdownToHtml(older.content)}</div>
-        </div>
-        <div class="comparison-column">
-            <h4>Newer: ${newerDate.toLocaleDateString()} ${newerDate.toLocaleTimeString()}</h4>
-            <div class="report-content">${markdownToHtml(newer.content)}</div>
+        <div class="comparison-container">
+            <div class="comparison-column">
+                <h4>Older: ${olderDate.toLocaleDateString('en-GB')} ${olderDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</h4>
+                <div class="report-content">${olderContent}</div>
+            </div>
+            <div class="comparison-column">
+                <h4>Newer: ${newerDate.toLocaleDateString('en-GB')} ${newerDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</h4>
+                <div class="report-content">${newerContent}</div>
+            </div>
         </div>
     `;
 }
 
-function extractMetrics(content) {
+function extractMetrics(report) {
     const metrics = {};
 
-    // Extract key metrics from the report content
+    // Try to extract from reportData first (new compliance reports)
+    if (report.reportData && report.reportData.all_stores) {
+        const stores = report.reportData.all_stores;
+
+        metrics.totalStores = stores.length;
+        metrics.redStores = stores.filter(s => s.overall_status === 'RED').length;
+        metrics.yellowStores = stores.filter(s => s.overall_status === 'YELLOW').length;
+        metrics.greenStores = stores.filter(s => s.overall_status === 'GREEN').length;
+
+        // Calculate average payroll variance
+        const variances = stores.map(s => s.payroll_variance_pct || 0).filter(v => v !== 0);
+        if (variances.length > 0) {
+            metrics.avgPayrollVariance = variances.reduce((a, b) => a + b, 0) / variances.length;
+        }
+
+        // Calculate average manual clocking percentage
+        const manualClocks = stores.map(s => s.manual_clock_pct || 0).filter(v => v !== 0);
+        if (manualClocks.length > 0) {
+            metrics.avgManualClocks = manualClocks.reduce((a, b) => a + b, 0) / manualClocks.length;
+        }
+
+        return metrics;
+    }
+
+    // Fallback to parsing content (old mock reports)
+    const content = report.content || '';
+
     const revenueMatch = content.match(/Total Revenue:\*?\*?\s*£?([\d.]+)M/i);
     if (revenueMatch) metrics.revenue = parseFloat(revenueMatch[1]);
 
@@ -1089,6 +1204,82 @@ function generateDeltaItems(older, newer) {
     return items.length > 0 ? items.join('') : '<p>No comparable metrics found</p>';
 }
 
+// New function for compliance metrics deltas
+function generateComplianceDeltaItems(older, newer) {
+    const items = [];
+
+    // Critical issues (RED stores)
+    if (older.redStores !== undefined && newer.redStores !== undefined) {
+        const change = newer.redStores - older.redStores;
+        // For RED stores, decrease is good (negative change is positive outcome)
+        const className = change < 0 ? 'delta-positive' : change > 0 ? 'delta-negative' : 'delta-neutral';
+        items.push(`
+            <div class="delta-item">
+                <span>Critical Issues (RED)</span>
+                <span class="${className}">${change > 0 ? '+' : ''}${change} stores</span>
+            </div>
+        `);
+    }
+
+    // Warnings (YELLOW stores)
+    if (older.yellowStores !== undefined && newer.yellowStores !== undefined) {
+        const change = newer.yellowStores - older.yellowStores;
+        // For YELLOW stores, decrease is good
+        const className = change < 0 ? 'delta-positive' : change > 0 ? 'delta-negative' : 'delta-neutral';
+        items.push(`
+            <div class="delta-item">
+                <span>Warnings (YELLOW)</span>
+                <span class="${className}">${change > 0 ? '+' : ''}${change} stores</span>
+            </div>
+        `);
+    }
+
+    // Compliant (GREEN stores)
+    if (older.greenStores !== undefined && newer.greenStores !== undefined) {
+        const change = newer.greenStores - older.greenStores;
+        // For GREEN stores, increase is good
+        const className = change > 0 ? 'delta-positive' : change < 0 ? 'delta-negative' : 'delta-neutral';
+        items.push(`
+            <div class="delta-item">
+                <span>Compliant (GREEN)</span>
+                <span class="${className}">${change > 0 ? '+' : ''}${change} stores</span>
+            </div>
+        `);
+    }
+
+    // Average payroll variance
+    if (older.avgPayrollVariance !== undefined && newer.avgPayrollVariance !== undefined) {
+        const change = (newer.avgPayrollVariance - older.avgPayrollVariance).toFixed(1);
+        // For variance, decrease in absolute value is good
+        const className = Math.abs(newer.avgPayrollVariance) < Math.abs(older.avgPayrollVariance)
+            ? 'delta-positive'
+            : Math.abs(newer.avgPayrollVariance) > Math.abs(older.avgPayrollVariance)
+            ? 'delta-negative'
+            : 'delta-neutral';
+        items.push(`
+            <div class="delta-item">
+                <span>Avg Payroll Variance</span>
+                <span class="${className}">${change > 0 ? '+' : ''}${change}%</span>
+            </div>
+        `);
+    }
+
+    // Average manual clocks
+    if (older.avgManualClocks !== undefined && newer.avgManualClocks !== undefined) {
+        const change = (newer.avgManualClocks - older.avgManualClocks).toFixed(1);
+        // For manual clocks, decrease is good
+        const className = change < 0 ? 'delta-positive' : change > 0 ? 'delta-negative' : 'delta-neutral';
+        items.push(`
+            <div class="delta-item">
+                <span>Avg Manual Clocking</span>
+                <span class="${className}">${change > 0 ? '+' : ''}${change}%</span>
+            </div>
+        `);
+    }
+
+    return items.length > 0 ? items.join('') : '<p>No comparable metrics found</p>';
+}
+
 // =============================================================================
 // UI HELPERS
 // =============================================================================
@@ -1136,6 +1327,65 @@ function showToast(message, type = 'info') {
 }
 
 // =============================================================================
+// PDF HANDLING
+// =============================================================================
+
+function downloadPDF(pdfUrl, filename) {
+    const a = document.createElement('a');
+    a.href = pdfUrl;
+    a.download = filename;
+    a.click();
+    showToast('PDF report downloaded', 'success');
+}
+
+function showReportPreview(report) {
+    // Show report preview modal with executive summary
+    state.currentReport = report;
+    elements.modalTitle.textContent = `Compliance Report - ${new Date(report.date).toLocaleDateString('en-GB')}`;
+
+    // Display executive summary and action buttons
+    const formattedSummary = report.summary ? formatSummaryText(report.summary) : 'No summary available';
+
+    elements.modalBody.innerHTML = `
+        <div class="report-preview-content">
+            <div class="preview-section">
+                <h4>Executive Summary</h4>
+                <div class="summary-text">${formattedSummary}</div>
+            </div>
+
+            <div class="preview-section">
+                <h4>Report Statistics</h4>
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <span class="stat-label">Total Stores:</span>
+                        <span class="stat-value">${report.reportData.all_stores?.length || 'N/A'}</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">RED Flags:</span>
+                        <span class="stat-value red">${report.reportData.all_stores?.filter(s => s.overall_status === 'RED').length || 0}</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">YELLOW Warnings:</span>
+                        <span class="stat-value yellow">${report.reportData.all_stores?.filter(s => s.overall_status === 'YELLOW').length || 0}</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">GREEN Compliant:</span>
+                        <span class="stat-value green">${report.reportData.all_stores?.filter(s => s.overall_status === 'GREEN').length || 0}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="preview-actions">
+                <p><strong>PDF Generated:</strong> The full compliance report is ready for download.</p>
+                <button onclick="window.location.reload()" class="secondary-btn">Generate Another Report</button>
+            </div>
+        </div>
+    `;
+
+    elements.reportModal.classList.remove('hidden');
+}
+
+// =============================================================================
 // UTILITY FUNCTIONS
 // =============================================================================
 
@@ -1169,6 +1419,38 @@ function getWeekNumber(date) {
     d.setUTCDate(d.getUTCDate() + 4 - dayNum);
     const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
     return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
+
+function formatSummaryText(text) {
+    // Format the AI-generated summary with proper HTML structure
+    // First, escape HTML to prevent XSS
+    const escaped = escapeHtml(text);
+
+    // Split into sections by looking for **Section Name:** pattern
+    const sections = escaped.split(/\*\*([^*]+):\*\*/);
+
+    let formatted = '';
+
+    for (let i = 0; i < sections.length; i++) {
+        if (i % 2 === 0) {
+            // This is content (not a heading)
+            if (sections[i].trim()) {
+                // Format numbered lists
+                let content = sections[i].trim();
+                content = content.replace(/(\d+)\.\s/g, '<br/><br/>$1. ');
+                formatted += `<p style="margin-bottom: 1.5rem;">${content}</p>`;
+            }
+        } else {
+            // This is a heading - convert to styled subheading
+            const heading = sections[i].trim();
+            // Skip if it's "Executive Summary" (already shown as h4)
+            if (heading !== 'Executive Summary') {
+                formatted += `<h5 style="font-weight: 600; margin-top: 1.5rem; margin-bottom: 0.75rem; color: #1a1a1a;">${heading}:</h5>`;
+            }
+        }
+    }
+
+    return formatted;
 }
 
 function markdownToHtml(markdown) {

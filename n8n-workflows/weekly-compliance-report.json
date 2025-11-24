@@ -1,0 +1,685 @@
+{
+  "name": "Weekly Compliance Report - Cards Direct",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "cronExpression": "0 9 * * 1"
+            }
+          ]
+        }
+      },
+      "name": "Schedule - Every Monday 9AM",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "id": "node-1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Set workflow configuration and environment variables\nconst config = {\n  // API Configuration\n  tenantId: '73890052-7df3-4774-bed7-b43d5ebd83db',\n  clientId: '6492b933-768a-47a6-a808-5b47192f672e',\n  clientSecret: $env.POWERBI_CLIENT_SECRET || 'YOb8Q~.M6rf-dNuX_3tTMmQPOnMCEr58vWExOddf',\n  scope: 'https://api.fabric.microsoft.com/.default',\n  datasetId: '80c0dd7c-ba46-4543-be77-faf57e0b806a',\n  workspaceId: '99355c3e-0913-4d08-a77c-2934cf1c94fb',\n  reportId: '6f5ef0e1-f6f9-4d79-a8ce-a98b4eaeb85c',\n\n  // Report Configuration\n  reportTitle: 'Weekly Compliance Report',\n  reportWeek: new Date().toISOString().split('T')[0],\n  areas: ['Area 1', 'Area 2', 'Area 3', 'Area 4', 'Area 5'],\n\n  // Threshold Configuration\n  thresholds: {\n    hoursVariancePercent: 5,\n    manualClockInPercent: 10,\n    cashDiscrepancyAmount: 50,\n    refundPercent: 3,\n    stockAdjustmentPercent: 2\n  },\n\n  // Email Configuration\n  recipients: ['matt@cardsdirect.co.uk', 'chirag@cardsdirect.co.uk'],\n  ccRecipients: ['executives@cardsdirect.co.uk'],\n\n  // OpenAI Configuration\n  openaiApiKey: $env.OPENAI_API_KEY,\n  openaiModel: 'gpt-4o',\n  \n  // Execution tracking\n  startTime: Date.now()\n};\n\nreturn [{ json: config }];"
+      },
+      "name": "Set Workflow Variables",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300],
+      "id": "node-2"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://login.microsoftonline.com/{{$json.tenantId}}/oauth2/v2.0/token",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "formUrlEncoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            },
+            {
+              "name": "client_id",
+              "value": "={{$json.clientId}}"
+            },
+            {
+              "name": "client_secret",
+              "value": "={{$json.clientSecret}}"
+            },
+            {
+              "name": "scope",
+              "value": "={{$json.scope}}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "name": "Get OAuth Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [650, 300],
+      "id": "node-3"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.access_token}}",
+              "operation": "isNotEmpty"
+            },
+            {
+              "value1": "={{$json.access_token.length}}",
+              "operation": "largerEqual",
+              "value2": 100
+            }
+          ]
+        }
+      },
+      "name": "Check Token Validity",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [850, 300],
+      "id": "node-4"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://pbi-dotnet-app.azurewebsites.net/api/metadata/AI Testing/80c0dd7c-ba46-4543-be77-faf57e0b806a?code=YKevjeGeeM5BXAIW6Li3Aqx4iQjHWzjuymCXc0DUK17wAzFuTX2OfA==",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\\n  \\\"client\\\": {\\n    \\\"POWERBI_TENANT_ID\\\": $('Set Workflow Variables').first().json.tenantId,\\n    \\\"POWERBI_CLIENT_ID\\\": $('Set Workflow Variables').first().json.clientId,\\n    \\\"POWERBI_CLIENT_SECRET\\\": $('Set Workflow Variables').first().json.clientSecret\\n  }\\n}) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "name": "Get Dataset Metadata",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1050, 200],
+      "id": "node-5"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract available tables and measures from metadata\nconst metadata = $input.first().json;\nconst config = $('Set Workflow Variables').first().json;\nconst tokenData = $('Get OAuth Token').first().json;\n\n// Parse metadata to identify relevant tables\nconst tables = metadata.tables || [];\nconst measures = metadata.measures || [];\n\n// Identify key tables for our report\nconst relevantTables = {\n  stores: tables.find(t => t.name && t.name.toLowerCase().includes('store')),\n  calendar: tables.find(t => t.name && t.name.toLowerCase().includes('calendar')),\n  budgetHours: tables.find(t => t.name && t.name.toLowerCase().includes('budget')),\n  users: tables.find(t => t.name && t.name.toLowerCase().includes('user')),\n  clocking: tables.find(t => t.name && t.name.toLowerCase().includes('clock')),\n  cash: tables.find(t => t.name && t.name.toLowerCase().includes('cash')),\n  stock: tables.find(t => t.name && t.name.toLowerCase().includes('stock'))\n};\n\n// Identify key measures\nconst keyMeasures = {\n  workedHours: measures.find(m => m.name === 'Worked_Hours'),\n  budgetHours: measures.find(m => m.name === 'Budget_Hours'),\n  manualClockIns: measures.find(m => m.name && m.name.includes('Manual_Clock')),\n  cashDiscrepancy: measures.find(m => m.name && m.name.includes('Cash_Discrepancy')),\n  refunds: measures.find(m => m.name && m.name.includes('Refund')),\n  stockAdjustments: measures.find(m => m.name && m.name.includes('Stock_Adjustment'))\n};\n\nreturn [{\n  json: {\n    ...config,\n    accessToken: tokenData.access_token,\n    metadata: {\n      tables: relevantTables,\n      measures: keyMeasures,\n      fullMetadata: metadata\n    }\n  }\n}];"
+      },
+      "name": "Parse Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 200],
+      "id": "node-6"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.powerbi.com/v1.0/myorg/datasets/{{$json.datasetId}}/executeQueries",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "bearerToken",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\\n  \\\"queries\\\": [{\\n    \\\"query\\\": `\\n      EVALUATE\\n      SUMMARIZECOLUMNS(\\n        Stores[Area],\\n        Stores[Store_Name],\\n        Stores[Store_ID],\\n        Calendar[Week_Ending],\\n        \\\"Worked_Hours\\\", [Worked_Hours],\\n        \\\"Budget_Hours\\\", [Budget_Hours],\\n        \\\"Hours_Variance\\\", [Worked_Hours] - [Budget_Hours],\\n        \\\"Variance_Percent\\\", DIVIDE([Worked_Hours] - [Budget_Hours], [Budget_Hours], 0) * 100,\\n        \\\"Manual_Clock_Ins\\\", [Manual_Clock_In_Count],\\n        \\\"Total_Clock_Ins\\\", [Total_Clock_In_Count],\\n        \\\"Manual_Clock_Percent\\\", DIVIDE([Manual_Clock_In_Count], [Total_Clock_In_Count], 0) * 100\\n      )\\n      ORDER BY Stores[Area], Stores[Store_Name]\\n    `\\n  }],\\n  \\\"serializerSettings\\\": {\\n    \\\"includeNulls\\\": true\\n  }\\n}) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "name": "Extract Payroll Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1450, 100],
+      "id": "node-7",
+      "credentials": {
+        "bearerTokenApi": {
+          "id": "1",
+          "name": "Bearer Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.powerbi.com/v1.0/myorg/datasets/{{$json.datasetId}}/executeQueries",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "bearerToken",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\\n  \\\"queries\\\": [{\\n    \\\"query\\\": `\\n      EVALUATE\\n      SUMMARIZECOLUMNS(\\n        Stores[Area],\\n        Stores[Store_Name],\\n        Stores[Store_ID],\\n        Calendar[Week_Ending],\\n        \\\"Cash_Discrepancy_Till\\\", [Cash_Discrepancy_Till],\\n        \\\"Cash_Discrepancy_Safe\\\", [Cash_Discrepancy_Safe],\\n        \\\"Cash_Discrepancy_Petty\\\", [Cash_Discrepancy_Petty_Cash],\\n        \\\"Total_Cash_Discrepancy\\\", [Total_Cash_Discrepancy],\\n        \\\"Float_Discrepancy\\\", [Float_Discrepancy],\\n        \\\"Refund_Amount\\\", [Refund_Amount],\\n        \\\"Total_Sales\\\", [Total_Sales],\\n        \\\"Refund_Percent\\\", DIVIDE([Refund_Amount], [Total_Sales], 0) * 100,\\n        \\\"Discount_Amount\\\", [Discount_Amount],\\n        \\\"Discount_Percent\\\", DIVIDE([Discount_Amount], [Total_Sales], 0) * 100\\n      )\\n      ORDER BY Stores[Area], Stores[Store_Name]\\n    `\\n  }],\\n  \\\"serializerSettings\\\": {\\n    \\\"includeNulls\\\": true\\n  }\\n}) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "name": "Extract Cash Control Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1450, 200],
+      "id": "node-8",
+      "credentials": {
+        "bearerTokenApi": {
+          "id": "1",
+          "name": "Bearer Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.powerbi.com/v1.0/myorg/datasets/{{$json.datasetId}}/executeQueries",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "bearerToken",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\\n  \\\"queries\\\": [{\\n    \\\"query\\\": `\\n      EVALUATE\\n      SUMMARIZECOLUMNS(\\n        Stores[Area],\\n        Stores[Store_Name],\\n        Stores[Store_ID],\\n        Calendar[Week_Ending],\\n        \\\"Stock_Writeoff_Amount\\\", [Stock_Writeoff_Amount],\\n        \\\"Stock_Adjustment_Amount\\\", [Stock_Adjustment_Amount],\\n        \\\"Manual_Adjustment_Count\\\", [Manual_Adjustment_Count],\\n        \\\"PO_Outstanding_Count\\\", [PO_Outstanding_Count],\\n        \\\"Transfer_Outstanding_Count\\\", [Transfer_Outstanding_Count],\\n        \\\"Stamp_Discrepancy\\\", [Stamp_Discrepancy],\\n        \\\"Stocktake_Completed\\\", [Stocktake_Completed_Flag],\\n        \\\"Stocktake_Due\\\", [Stocktake_Due_Flag],\\n        \\\"Consumables_Ordered\\\", [Consumables_Ordered_Flag],\\n        \\\"Consumables_Due\\\", [Consumables_Due_Flag]\\n      )\\n      ORDER BY Stores[Area], Stores[Store_Name]\\n    `\\n  }],\\n  \\\"serializerSettings\\\": {\\n    \\\"includeNulls\\\": true\\n  }\\n}) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "name": "Extract Stock Control Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1450, 300],
+      "id": "node-8",
+      "credentials": {
+        "bearerTokenApi": {
+          "id": "1",
+          "name": "Bearer Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "multiplex",
+        "options": {}
+      },
+      "name": "Merge Data Streams",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [1650, 200],
+      "id": "node-10"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code node - Merge all data sources\nconst payrollData = $('Extract Payroll Data').first().json.results[0].tables[0].rows;\nconst cashData = $('Extract Cash Control Data').first().json.results[0].tables[0].rows;\nconst stockData = $('Extract Stock Control Data').first().json.results[0].tables[0].rows;\nconst config = $('Parse Metadata').first().json;\n\n// Merge data by store\nconst mergedData = {};\n\npayrollData.forEach(row => {\n  const storeId = row['[Stores].[Store_ID]'];\n  mergedData[storeId] = {\n    area: row['[Stores].[Area]'],\n    storeName: row['[Stores].[Store_Name]'],\n    storeId: storeId,\n    payroll: row\n  };\n});\n\ncashData.forEach(row => {\n  const storeId = row['[Stores].[Store_ID]'];\n  if (mergedData[storeId]) {\n    mergedData[storeId].cash = row;\n  }\n});\n\nstockData.forEach(row => {\n  const storeId = row['[Stores].[Store_ID]'];\n  if (mergedData[storeId]) {\n    mergedData[storeId].stock = row;\n  }\n});\n\n// Convert to array and group by area\nconst storeArray = Object.values(mergedData);\nconst byArea = {};\n\nstoreArray.forEach(store => {\n  if (!byArea[store.area]) {\n    byArea[store.area] = [];\n  }\n  byArea[store.area].push(store);\n});\n\nreturn [{\n  json: {\n    ...config,\n    data: {\n      byStore: storeArray,\n      byArea: byArea,\n      totalStores: storeArray.length\n    }\n  }\n}];"
+      },
+      "name": "Merge Data by Store",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1850, 200],
+      "id": "node-10-process"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Calculate area-level aggregations\nconst context = $input.first().json;\nconst byArea = context.data.byArea;\nconst thresholds = context.thresholds;\n\nconst areaSummaries = {};\n\nObject.keys(byArea).forEach(areaName => {\n  const stores = byArea[areaName];\n\n  // Payroll aggregations\n  const totalWorkedHours = stores.reduce((sum, s) => sum + (s.payroll?.['[Worked_Hours]'] || 0), 0);\n  const totalBudgetHours = stores.reduce((sum, s) => sum + (s.payroll?.['[Budget_Hours]'] || 0), 0);\n  const totalManualClockIns = stores.reduce((sum, s) => sum + (s.payroll?.['[Manual_Clock_Ins]'] || 0), 0);\n  const totalClockIns = stores.reduce((sum, s) => sum + (s.payroll?.['[Total_Clock_Ins]'] || 0), 0);\n\n  // Cash aggregations\n  const totalCashDiscrepancy = stores.reduce((sum, s) => sum + Math.abs(s.cash?.['[Total_Cash_Discrepancy]'] || 0), 0);\n  const totalRefunds = stores.reduce((sum, s) => sum + (s.cash?.['[Refund_Amount]'] || 0), 0);\n  const totalSales = stores.reduce((sum, s) => sum + (s.cash?.['[Total_Sales]'] || 0), 0);\n\n  // Stock aggregations\n  const totalStockAdjustments = stores.reduce((sum, s) => sum + (s.stock?.['[Stock_Adjustment_Amount]'] || 0), 0);\n  const totalPOsOutstanding = stores.reduce((sum, s) => sum + (s.stock?.['[PO_Outstanding_Count]'] || 0), 0);\n  const stocktakesIncomplete = stores.filter(s => s.stock?.['[Stocktake_Due]'] && !s.stock?.['[Stocktake_Completed]']).length;\n\n  areaSummaries[areaName] = {\n    areaName,\n    storeCount: stores.length,\n    payroll: {\n      workedHours: totalWorkedHours,\n      budgetHours: totalBudgetHours,\n      variance: totalWorkedHours - totalBudgetHours,\n      variancePercent: ((totalWorkedHours - totalBudgetHours) / totalBudgetHours * 100).toFixed(2),\n      manualClockIns: totalManualClockIns,\n      totalClockIns: totalClockIns,\n      manualClockPercent: (totalManualClockIns / totalClockIns * 100).toFixed(2)\n    },\n    cash: {\n      totalDiscrepancy: totalCashDiscrepancy,\n      refundAmount: totalRefunds,\n      totalSales: totalSales,\n      refundPercent: (totalRefunds / totalSales * 100).toFixed(2)\n    },\n    stock: {\n      adjustmentAmount: totalStockAdjustments,\n      posOutstanding: totalPOsOutstanding,\n      stocktakesIncomplete: stocktakesIncomplete\n    },\n    stores: stores\n  };\n});\n\nreturn [{\n  json: {\n    ...context,\n    areaSummaries: areaSummaries\n  }\n}];"
+      },
+      "name": "Transform & Aggregate by Area",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2050, 200],
+      "id": "node-11"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Flag exceptions based on thresholds\nconst context = $input.first().json;\nconst areaSummaries = context.areaSummaries;\nconst thresholds = context.thresholds;\n\nconst exceptions = {\n  critical: [],\n  warning: [],\n  info: []\n};\n\nObject.values(areaSummaries).forEach(area => {\n  // Check payroll variances\n  if (Math.abs(area.payroll.variancePercent) > thresholds.hoursVariancePercent) {\n    exceptions.critical.push({\n      area: area.areaName,\n      type: 'PAYROLL',\n      issue: `Hours variance ${area.payroll.variancePercent}% (threshold: ${thresholds.hoursVariancePercent}%)`,\n      value: area.payroll.variance,\n      severity: Math.abs(area.payroll.variancePercent) > 10 ? 'RED' : 'YELLOW'\n    });\n  }\n\n  if (area.payroll.manualClockPercent > thresholds.manualClockInPercent) {\n    exceptions.warning.push({\n      area: area.areaName,\n      type: 'PAYROLL',\n      issue: `Manual clock-ins ${area.payroll.manualClockPercent}% (threshold: ${thresholds.manualClockInPercent}%)`,\n      value: area.payroll.manualClockIns,\n      severity: area.payroll.manualClockPercent > 20 ? 'RED' : 'YELLOW'\n    });\n  }\n\n  // Check cash discrepancies\n  if (area.cash.totalDiscrepancy > thresholds.cashDiscrepancyAmount) {\n    exceptions.critical.push({\n      area: area.areaName,\n      type: 'CASH',\n      issue: `Cash discrepancy £${area.cash.totalDiscrepancy.toFixed(2)} (threshold: £${thresholds.cashDiscrepancyAmount})`,\n      value: area.cash.totalDiscrepancy,\n      severity: area.cash.totalDiscrepancy > 100 ? 'RED' : 'YELLOW'\n    });\n  }\n\n  if (area.cash.refundPercent > thresholds.refundPercent) {\n    exceptions.warning.push({\n      area: area.areaName,\n      type: 'CASH',\n      issue: `Refunds ${area.cash.refundPercent}% of sales (threshold: ${thresholds.refundPercent}%)`,\n      value: area.cash.refundAmount,\n      severity: area.cash.refundPercent > 5 ? 'RED' : 'YELLOW'\n    });\n  }\n\n  // Check stock issues\n  if (area.stock.stocktakesIncomplete > 0) {\n    exceptions.warning.push({\n      area: area.areaName,\n      type: 'STOCK',\n      issue: `${area.stock.stocktakesIncomplete} incomplete stocktakes`,\n      value: area.stock.stocktakesIncomplete,\n      severity: area.stock.stocktakesIncomplete > 2 ? 'RED' : 'YELLOW'\n    });\n  }\n\n  // Store-level exceptions\n  area.stores.forEach(store => {\n    const storeHoursVariance = store.payroll?.['[Variance_Percent]'] || 0;\n    if (Math.abs(storeHoursVariance) > thresholds.hoursVariancePercent) {\n      exceptions.info.push({\n        area: area.areaName,\n        store: store.storeName,\n        type: 'PAYROLL',\n        issue: `Store hours variance ${storeHoursVariance.toFixed(2)}%`,\n        value: store.payroll?.['[Hours_Variance]'] || 0,\n        severity: Math.abs(storeHoursVariance) > 10 ? 'RED' : 'YELLOW'\n      });\n    }\n  });\n});\n\nreturn [{\n  json: {\n    ...context,\n    exceptions: exceptions,\n    exceptionCount: {\n      critical: exceptions.critical.length,\n      warning: exceptions.warning.length,\n      info: exceptions.info.length,\n      total: exceptions.critical.length + exceptions.warning.length + exceptions.info.length\n    }\n  }\n}];"
+      },
+      "name": "Calculate KPIs & Exceptions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2250, 200],
+      "id": "node-12"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Structure data for GPT-4o analysis\nconst context = $input.first().json;\nconst areaSummaries = context.areaSummaries;\nconst exceptions = context.exceptions;\n\n// Create structured context for AI\nconst aiContext = {\n  reportWeek: context.reportWeek,\n  companyName: \"Cards Direct\",\n  totalStores: context.data.totalStores,\n  areas: Object.keys(areaSummaries).length,\n\n  // Area summaries\n  areaSummaries: Object.values(areaSummaries).map(area => ({\n    name: area.areaName,\n    stores: area.storeCount,\n    payroll: {\n      workedHours: area.payroll.workedHours.toFixed(2),\n      budgetHours: area.payroll.budgetHours.toFixed(2),\n      varianceHours: area.payroll.variance.toFixed(2),\n      variancePercent: area.payroll.variancePercent,\n      manualClockIns: area.payroll.manualClockIns,\n      manualClockPercent: area.payroll.manualClockPercent\n    },\n    cash: {\n      discrepancy: area.cash.totalDiscrepancy.toFixed(2),\n      refunds: area.cash.refundAmount.toFixed(2),\n      refundPercent: area.cash.refundPercent\n    },\n    stock: {\n      posOutstanding: area.stock.posOutstanding,\n      stocktakesIncomplete: area.stock.stocktakesIncomplete\n    }\n  })),\n\n  // Exceptions by severity\n  criticalIssues: exceptions.critical,\n  warnings: exceptions.warning,\n\n  // Top store-level issues (top 10 by severity)\n  topStoreIssues: exceptions.info\n    .sort((a, b) => {\n      const severityOrder = { RED: 3, YELLOW: 2, GREEN: 1 };\n      return (severityOrder[b.severity] || 0) - (severityOrder[a.severity] || 0);\n    })\n    .slice(0, 10)\n};\n\nreturn [{\n  json: {\n    ...context,\n    aiContext: aiContext\n  }\n}];"
+      },
+      "name": "Prepare AI Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2450, 200],
+      "id": "node-13"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\\n  model: $json.openaiModel,\\n  messages: [\\n    {\\n      role: \\\"system\\\",\\n      content: `You are an expert retail operations analyst specializing in UK compliance reporting for multi-site retail chains. Your role is to analyze weekly operational data and write concise, actionable executive summaries.\\n\\nCONTEXT:\\n- Company: Cards Direct (90+ retail stores across UK)\\n- Report Type: Weekly Compliance Report\\n- Audience: Executive team (CEO, COO, Finance Director, Area Managers)\\n- Tone: Professional, direct, action-oriented\\n\\nREPORTING STRUCTURE:\\nThe report covers three main compliance areas:\\n\\n1. PAYROLL\\n   - Worked hours vs budget (rota hours)\\n   - Manual clock-in compliance\\n   - Store-level variances\\n\\n2. CASH CONTROLS\\n   - Cash discrepancies (till, safe, petty cash)\\n   - Float discrepancies\\n   - Refunds and discounts as % of sales\\n\\n3. STOCK CONTROL\\n   - Stock adjustments and write-offs\\n   - Outstanding POs and transfers\\n   - Stocktake completion\\n   - Consumables ordering\\n\\nWRITING GUIDELINES:\\n1. Start each section with area-level summary\\n2. Highlight exceptions (red/yellow flags) with specific values\\n3. Call out individual stores requiring attention\\n4. Request explanations for significant variances\\n5. Use UK terminology and currency (£)\\n6. Be concise but specific (include actual numbers)\\n7. Organize by geographic area (Area 1-5)\\n8. Use bullet points for clarity\\n\\nSEVERITY LEVELS:\\n- RED: Immediate action required (mention \\\"requires urgent attention\\\")\\n- YELLOW: Monitor closely (mention \\\"please review\\\")\\n- GREEN: Within acceptable range (no mention needed)\\n\\nOUTPUT FORMAT:\\nStructured email with clear sections:\\n- PAYROLL section\\n- CASH CONTROLS section\\n- STOCK CONTROL section\\nEach section organized by Area 1-5, with specific store callouts.`\\n    },\\n    {\\n      role: \\\"user\\\",\\n      content: `Generate the executive summary email for this week's compliance report.\\n\\nREPORT DATA:\\n${JSON.stringify($json.aiContext, null, 2)}\\n\\nWrite a professional email narrative following the structure described in your system prompt. Focus on exceptions and actionable items. Be specific with store names and values.`\\n    }\\n  ],\\n  temperature: 0.3,\\n  max_tokens: 2000\\n}) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "name": "Generate Narrative Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2650, 200],
+      "id": "node-14",
+      "credentials": {
+        "openAiApi": {
+          "id": "2",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract narrative from OpenAI response\nconst context = $('Prepare AI Context').first().json;\nconst openaiResponse = $input.first().json;\n\nconst narrative = openaiResponse.choices[0].message.content;\n\n// Extract sections from narrative\nconst sections = {\n  payroll: '',\n  cashControls: '',\n  stockControl: ''\n};\n\n// Simple parsing based on section headers\nconst payrollMatch = narrative.match(/PAYROLL[\\s\\S]*?(?=CASH CONTROLS|$)/i);\nconst cashMatch = narrative.match(/CASH CONTROLS[\\s\\S]*?(?=STOCK CONTROL|$)/i);\nconst stockMatch = narrative.match(/STOCK CONTROL[\\s\\S]*$/i);\n\nif (payrollMatch) sections.payroll = payrollMatch[0].trim();\nif (cashMatch) sections.cashControls = cashMatch[0].trim();\nif (stockMatch) sections.stockControl = stockMatch[0].trim();\n\nreturn [{\n  json: {\n    ...context,\n    narrative: {\n      full: narrative,\n      sections: sections\n    }\n  }\n}];"
+      },
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2850, 200],
+      "id": "node-15"
+    },
+    {
+      "parameters": {
+        "jsCode": "// NOTE: PDF generation requires PDFKit library\n// This is a placeholder that will need PDFKit npm package installed in n8n\n// For production: npm install pdfkit in n8n's custom node modules\n\nconst context = $input.first().json;\n\n// For now, create a simplified PDF structure\n// In production, this will use PDFKit to generate actual PDF\nconst pdfContent = {\n  title: `Weekly Compliance Report - ${context.reportWeek}`,\n  generated: new Date().toISOString(),\n  totalStores: context.data.totalStores,\n  areas: Object.keys(context.areaSummaries).length,\n  exceptions: context.exceptionCount,\n  narrative: context.narrative.full,\n  areaSummaries: context.areaSummaries\n};\n\n// Create a mock PDF buffer (in production, use PDFKit)\nconst pdfBase64 = Buffer.from(JSON.stringify(pdfContent, null, 2)).toString('base64');\n\nreturn [{\n  json: {\n    ...context,\n    pdf: {\n      base64: pdfBase64,\n      filename: `Compliance_Report_${context.reportWeek}.pdf`,\n      mimeType: 'application/pdf'\n    }\n  }\n}];\n\n// PRODUCTION CODE (requires PDFKit):\n/*\nconst PDFDocument = require('pdfkit');\nconst context = $input.first().json;\nconst areaSummaries = context.areaSummaries;\nconst exceptions = context.exceptions;\n\nconst doc = new PDFDocument({\n  size: 'A4',\n  margin: 50,\n  info: {\n    Title: `Weekly Compliance Report - ${context.reportWeek}`,\n    Author: 'Cards Direct Automation System'\n  }\n});\n\n// Generate PDF pages here...\n// See specification for full implementation\n\ndoc.end();\n\nconst chunks = [];\ndoc.on('data', chunk => chunks.push(chunk));\n\nreturn new Promise((resolve) => {\n  doc.on('end', () => {\n    const pdfBuffer = Buffer.concat(chunks);\n    const pdfBase64 = pdfBuffer.toString('base64');\n    resolve([{\n      json: {\n        ...context,\n        pdf: {\n          buffer: pdfBuffer,\n          base64: pdfBase64,\n          filename: `Compliance_Report_${context.reportWeek}.pdf`\n        }\n      }\n    }]);\n  });\n});\n*/"
+      },
+      "name": "Generate PDF Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3050, 200],
+      "id": "node-16"
+    },
+    {
+      "parameters": {
+        "fromEmail": "automation@cardsdirect.co.uk",
+        "toEmail": "={{$json.recipients.join(',')}}",
+        "ccEmail": "={{$json.ccRecipients.join(',')}}",
+        "subject": "=Weekly Compliance Report - Week Ending {{$json.reportWeek}}",
+        "emailType": "html",
+        "message": "={{$json.narrative.full}}",
+        "attachments": "={{ $json.pdf.filename }}",
+        "options": {}
+      },
+      "name": "Send Compliance Report Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [3250, 200],
+      "id": "node-17"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'https://' + $env.AZURE_STORAGE_ACCOUNT + '.blob.core.windows.net/compliance-reports/' + $json.pdf.filename + '?' + $env.AZURE_STORAGE_SAS_TOKEN }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-ms-blob-type",
+              "value": "BlockBlob"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/pdf"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{$json.pdf.base64}}",
+        "options": {}
+      },
+      "name": "Archive to Azure Blob",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [3450, 200],
+      "id": "node-18"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log successful execution\nconst context = $input.first().json;\n\nconst logEntry = {\n  timestamp: new Date().toISOString(),\n  status: 'SUCCESS',\n  reportWeek: context.reportWeek,\n  storesProcessed: context.data.totalStores,\n  exceptionsFound: context.exceptionCount.total,\n  pdfGenerated: true,\n  emailSent: true,\n  archived: true,\n  executionTime: Date.now() - context.startTime\n};\n\nconsole.log('Workflow completed successfully:', JSON.stringify(logEntry, null, 2));\n\nreturn [{ json: logEntry }];"
+      },
+      "name": "Log Success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3650, 200],
+      "id": "node-19"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Error handler\nconst error = $input.first().error || { message: 'Unknown error' };\n\nconst errorLog = {\n  timestamp: new Date().toISOString(),\n  status: 'FAILED',\n  errorMessage: error.message,\n  errorStack: error.stack || '',\n  failedNode: error.node || 'Unknown'\n};\n\nconsole.error('Workflow failed:', JSON.stringify(errorLog, null, 2));\n\nreturn [{ json: errorLog }];"
+      },
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 400],
+      "id": "node-21"
+    },
+    {
+      "parameters": {
+        "fromEmail": "automation@cardsdirect.co.uk",
+        "toEmail": "it-alerts@cardsdirect.co.uk",
+        "subject": "ALERT: Weekly Compliance Report Failed",
+        "emailType": "text",
+        "message": "=The weekly compliance report workflow failed with the following error:\\n\\nError: {{$json.errorMessage}}\\n\\nNode: {{$json.failedNode}}\\n\\nTimestamp: {{$json.timestamp}}\\n\\nPlease investigate immediately.",
+        "options": {}
+      },
+      "name": "Send Alert Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1250, 400],
+      "id": "node-22"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log error to console\nconst errorData = $input.first().json;\nconsole.error('ERROR LOGGED:', errorData);\nreturn [{ json: errorData }];"
+      },
+      "name": "Log Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1450, 400],
+      "id": "node-23"
+    }
+  ],
+  "connections": {
+    "Schedule - Every Monday 9AM": {
+      "main": [
+        [
+          {
+            "node": "Set Workflow Variables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Workflow Variables": {
+      "main": [
+        [
+          {
+            "node": "Get OAuth Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get OAuth Token": {
+      "main": [
+        [
+          {
+            "node": "Check Token Validity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Token Validity": {
+      "main": [
+        [
+          {
+            "node": "Get Dataset Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Dataset Metadata": {
+      "main": [
+        [
+          {
+            "node": "Parse Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Metadata": {
+      "main": [
+        [
+          {
+            "node": "Extract Payroll Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Extract Cash Control Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Extract Stock Control Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Payroll Data": {
+      "main": [
+        [
+          {
+            "node": "Merge Data Streams",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Cash Control Data": {
+      "main": [
+        [
+          {
+            "node": "Merge Data Streams",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Extract Stock Control Data": {
+      "main": [
+        [
+          {
+            "node": "Merge Data Streams",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge Data Streams": {
+      "main": [
+        [
+          {
+            "node": "Merge Data by Store",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Data by Store": {
+      "main": [
+        [
+          {
+            "node": "Transform & Aggregate by Area",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform & Aggregate by Area": {
+      "main": [
+        [
+          {
+            "node": "Calculate KPIs & Exceptions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate KPIs & Exceptions": {
+      "main": [
+        [
+          {
+            "node": "Prepare AI Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare AI Context": {
+      "main": [
+        [
+          {
+            "node": "Generate Narrative Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Narrative Analysis": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "Generate PDF Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate PDF Report": {
+      "main": [
+        [
+          {
+            "node": "Send Compliance Report Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Compliance Report Email": {
+      "main": [
+        [
+          {
+            "node": "Archive to Azure Blob",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Archive to Azure Blob": {
+      "main": [
+        [
+          {
+            "node": "Log Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Handler": {
+      "main": [
+        [
+          {
+            "node": "Send Alert Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Alert Email": {
+      "main": [
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2025-01-21T00:00:00.000Z",
+  "versionId": "1"
+}
