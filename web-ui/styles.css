@@ -546,9 +546,8 @@ body {
     background: var(--background);
     border-radius: 0.5rem;
     padding: 0.75rem;
-    overflow-y: auto;
-    max-height: 60vh;
     min-width: 0; /* Prevents overflow in grid */
+    height: fit-content;
 }
 
 .comparison-column h4 {
@@ -765,4 +764,49 @@ body {
         align-items: flex-end;
         gap: 0.5rem;
     }
+}
+
+/* Executive Summary Formatting */
+.summary-content {
+    color: var(--text-primary);
+    line-height: 1.8;
+}
+
+.summary-section {
+    margin-bottom: 1.5rem;
+}
+
+.summary-section:last-child {
+    margin-bottom: 0;
+}
+
+.summary-heading {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--primary-color);
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.summary-paragraph {
+    margin-bottom: 1rem;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+}
+
+.summary-paragraph:last-child {
+    margin-bottom: 0;
+}
+
+.summary-list {
+    margin-left: 1.5rem;
+    margin-bottom: 1rem;
+}
+
+.summary-list li {
+    margin-bottom: 0.5rem;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    line-height: 1.6;
 }

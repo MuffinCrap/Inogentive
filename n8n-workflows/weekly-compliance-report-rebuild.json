@@ -1,5 +1,5 @@
 {
-  "name": "Weekly Compliance Report - Cards Direct",
+  "name": "Weekly Compliance Report Rebuild - Cards Direct",
   "nodes": [
     {
       "parameters": {
@@ -169,7 +169,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"queries\": [\n    {\n      \"query\": \"EVALUATE VAR MaxWeek = MAX('Budget_Hours'[start_of_week]) RETURN FILTER(SUMMARIZECOLUMNS('Stores'[entity_id], 'Stores'[Store Name], 'Stores'[Area], 'Calendar'[Start_of_Week], \\\"Budget_Hours\\\", [Budget_Hours]), 'Calendar'[Start_of_Week] = MaxWeek)\"\n    }\n  ]\n}",
+        "jsonBody": "={\n  \"queries\": [\n    {\n      \"query\": \"EVALUATE SUMMARIZECOLUMNS('Stores'[entity_id], 'Stores'[Store Name], 'Stores'[Area], 'Budget_Hours'[start_of_week], 'Report_Measures'[Budget_Hours])\"\n    }\n  ]\n}",
         "options": {}
       },
       "id": "node-7",
@@ -198,7 +198,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"queries\": [\n    {\n      \"query\": \"EVALUATE VAR MaxDate = MAX('HourSummary'[Date]) VAR MaxWeek = CALCULATE(VALUES('Calendar'[Start_of_Week]), 'Calendar'[Date] = MaxDate) RETURN FILTER(SUMMARIZECOLUMNS('Stores'[entity_id], 'Stores'[Store Name], 'Stores'[Area], 'Calendar'[Start_of_Week], \\\"Worked_Hours\\\", [Worked_Hours]), 'Calendar'[Start_of_Week] = MaxWeek)\"\n    }\n  ]\n}",
+        "jsonBody": "={\n  \"queries\": [\n    {\n      \"query\": \"EVALUATE SUMMARIZECOLUMNS('Stores'[entity_id], 'Stores'[Store Name], 'Stores'[Area], 'Calendar'[Start_of_Week], 'Report_Measures'[Worked_Hours])\"\n    }\n  ]\n}",
         "options": {}
       },
       "id": "node-8",
@@ -227,7 +227,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"queries\": [\n    {\n      \"query\": \"EVALUATE VAR MaxDate = MAX('Clockings'[date]) VAR MaxWeek = CALCULATE(VALUES('Calendar'[Start_of_Week]), 'Calendar'[Date] = MaxDate) RETURN FILTER(SUMMARIZECOLUMNS('Stores'[entity_id], 'Stores'[Store Name], 'Stores'[Area], 'Calendar'[Start_of_Week], \\\"Total_Actions\\\", [Total Actions], \\\"Manual_Clocks\\\", [Manual Clocks]), 'Calendar'[Start_of_Week] = MaxWeek)\"\n    }\n  ]\n}",
+        "jsonBody": "={\n  \"queries\": [\n    {\n      \"query\": \"EVALUATE SUMMARIZECOLUMNS('Stores'[entity_id], 'Stores'[Store Name], 'Stores'[Area], 'Report_Measures'[Total Actions], 'Report_Measures'[Manual Clocks])\"\n    }\n  ]\n}",
         "options": {}
       },
       "id": "node-9",
@@ -239,7 +239,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Merge data from all three queries by store\nconst budgetData = $node[\"Extract Budget Hours\"].json.results[0].tables[0].rows;\nconst workedData = $node[\"Extract Worked Hours\"].json.results[0].tables[0].rows;\nconst clockingData = $node[\"Extract Clocking Data\"].json.results[0].tables[0].rows;\n\n// Debug logging\nconsole.log('Budget rows:', budgetData.length);\nconsole.log('Worked rows:', workedData.length);\nconsole.log('Clocking rows:', clockingData.length);\nif (budgetData.length > 0) console.log('Budget sample:', budgetData[0]);\nif (workedData.length > 0) console.log('Worked sample:', workedData[0]);\nif (clockingData.length > 0) console.log('Clocking sample:', clockingData[0]);\n\n// Create store lookup\nconst storeData = {};\n\n// Process budget hours\nfor (const row of budgetData) {\n  const storeId = row['Stores[entity_id]'];\n  if (!storeData[storeId]) {\n    storeData[storeId] = {\n      entity_id: storeId,\n      store_name: row['Stores[Store Name]'],\n      area: row['Stores[Area]']\n    };\n  }\n  storeData[storeId].budget_hours = row['[Budget_Hours]'] || 0;\n}\n\n// Process worked hours\nfor (const row of workedData) {\n  const storeId = row['Stores[entity_id]'];\n  if (storeData[storeId]) {\n    storeData[storeId].worked_hours = row['[Worked_Hours]'] || 0;\n  }\n}\n\n// Process clocking data\nfor (const row of clockingData) {\n  const storeId = row['Stores[entity_id]'];\n  if (storeData[storeId]) {\n    storeData[storeId].total_clockings = row['[Total_Actions]'] || 0;\n    storeData[storeId].manual_clocks = row['[Manual_Clocks]'] || 0;\n  }\n}\n\n// Convert to array\nconst mergedData = Object.values(storeData);\n\nconsole.log('Merged stores:', mergedData.length);\nif (mergedData.length > 0) console.log('Merged sample:', mergedData[0]);\n\nreturn mergedData.map(store => ({ json: store }));"
+        "jsCode": "// Merge data from all three queries by store\nconst budgetData = $node[\"Extract Budget Hours\"].json.results[0].tables[0].rows;\nconst workedData = $node[\"Extract Worked Hours\"].json.results[0].tables[0].rows;\nconst clockingData = $node[\"Extract Clocking Data\"].json.results[0].tables[0].rows;\n\n// Create store lookup\nconst storeData = {};\n\n// Process budget hours\nfor (const row of budgetData) {\n  const storeId = row['[Stores.entity_id]'];\n  if (!storeData[storeId]) {\n    storeData[storeId] = {\n      entity_id: storeId,\n      store_name: row['[Stores.Store Name]'],\n      area: row['[Stores.Area]']\n    };\n  }\n  storeData[storeId].budget_hours = row['[Report_Measures.Budget_Hours]'] || 0;\n}\n\n// Process worked hours\nfor (const row of workedData) {\n  const storeId = row['[Stores.entity_id]'];\n  if (storeData[storeId]) {\n    storeData[storeId].worked_hours = row['[Report_Measures.Worked_Hours]'] || 0;\n  }\n}\n\n// Process clocking data\nfor (const row of clockingData) {\n  const storeId = row['[Stores.entity_id]'];\n  if (storeData[storeId]) {\n    storeData[storeId].total_clockings = row['[Report_Measures.Total Actions]'] || 0;\n    storeData[storeId].manual_clocks = row['[Report_Measures.Manual Clocks]'] || 0;\n  }\n}\n\n// Convert to array\nconst mergedData = Object.values(storeData);\n\nreturn mergedData.map(store => ({ json: store }));"
       },
       "id": "node-10",
       "name": "Merge Store Data",

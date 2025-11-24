@@ -35,6 +35,37 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// N8N Proxy endpoint - forwards requests to n8n cloud to avoid CORS
+app.post('/api/n8n-proxy', async (req, res) => {
+  try {
+    const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL || 'https://cdpoc.app.n8n.cloud/webhook/weekly-compliance-webhook';
+
+    console.log('Proxying request to n8n:', n8nWebhookUrl);
+
+    const response = await fetch(n8nWebhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(req.body)
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return res.status(response.status).json(data);
+    }
+
+    res.json(data);
+  } catch (error) {
+    console.error('N8N proxy error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Generate report endpoint (for N8N webhook)
 app.post('/api/generate-report', async (req, res) => {
   const startTime = Date.now();
