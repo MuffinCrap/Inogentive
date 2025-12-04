@@ -1057,7 +1057,6 @@ function showReportPreview(report) {
     elements.modalBody.innerHTML = `
         <div class="report-preview-content">
             <div class="preview-section">
-                <h4>Executive Summary</h4>
                 <div class="summary-content">
                     ${formattedSummary}
                 </div>
